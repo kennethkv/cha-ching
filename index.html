@@ -15,6 +15,7 @@
   <link rel="icon" type="image/png" href="icon-192.png">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
@@ -1355,57 +1356,162 @@ function openSyncExplainer() {
   document.getElementById("sync-overlay").classList.remove("hidden");
 }
 
-// Debounced local-first sync trigger — called from persist() on every state change
-let _syncTimer = null;
+// ── Google OAuth + Sheets config ──
+const GOOGLE_CLIENT_ID = "646841870267-dpkp35nin2vpker9e173ravu9rt9h9lp.apps.googleusercontent.com";
+const GOOGLE_SCOPE     = "https://www.googleapis.com/auth/drive.file openid email";
+const SHEET_TITLE      = "Cha-Ching Data";
+const SHEET_TAB        = "Transactions";
+
+let tokenClient = null, accessToken = null, tokenExpiry = 0;
+
+function gisReady() { return !!(window.google && google.accounts && google.accounts.oauth2); }
+async function waitForGis(ms = 6000) {
+  const start = Date.now();
+  while (!gisReady()) {
+    if (Date.now() - start > ms) throw new Error("Google sign-in library failed to load");
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+function initTokenClient() {
+  if (tokenClient) return;
+  tokenClient = google.accounts.oauth2.initTokenClient({ client_id: GOOGLE_CLIENT_ID, scope: GOOGLE_SCOPE, callback: () => {} });
+}
+async function getToken(interactive) {
+  await waitForGis();
+  initTokenClient();
+  return new Promise((resolve, reject) => {
+    tokenClient.callback = resp => {
+      if (resp.error) { reject(new Error(resp.error)); return; }
+      accessToken = resp.access_token;
+      tokenExpiry = Date.now() + ((resp.expires_in || 3600) * 1000) - 60000;
+      resolve(accessToken);
+    };
+    tokenClient.error_callback = err => reject(err);
+    tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+  });
+}
+async function ensureToken() {
+  if (accessToken && Date.now() < tokenExpiry) return accessToken;
+  return getToken(false); // silent refresh; throws if re-consent needed
+}
+async function gapi(url, opts = {}) {
+  const token = await ensureToken();
+  const res = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + token, "Content-Type": "application/json" } });
+  if (!res.ok) throw new Error("Google API " + res.status + ": " + (await res.text()).slice(0, 300));
+  return res.status === 204 ? null : res.json();
+}
+
+// Find the app's existing sheet (drive.file only ever lists files this app created) or create one
+async function ensureSpreadsheet() {
+  if (S.sync.spreadsheetId) return S.sync.spreadsheetId;
+  const q = encodeURIComponent(`name='${SHEET_TITLE}' and trashed=false`);
+  const list = await gapi(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`);
+  if (list.files && list.files.length) { S.sync.spreadsheetId = list.files[0].id; persist(); return S.sync.spreadsheetId; }
+  const created = await gapi("https://sheets.googleapis.com/v4/spreadsheets", {
+    method: "POST",
+    body: JSON.stringify({ properties: { title: SHEET_TITLE }, sheets: [{ properties: { title: SHEET_TAB } }] })
+  });
+  S.sync.spreadsheetId = created.spreadsheetId; persist();
+  return S.sync.spreadsheetId;
+}
+
+function txnsToRows() {
+  const header = ["Date", "Type", "Category", "Amount", "Currency", "Note"];
+  return [header, ...S.transactions.map(tx => [tx.date, tx.type, tx.category, tx.amount, S.currency, tx.note])];
+}
+
+// Debounced local-first sync — called from persist() on every state change
+let _syncTimer = null, _syncing = false;
 function queueSync() {
-  if (!S || !S.sync || !S.sync.connected) return;
+  if (!S || !S.sync || !S.sync.connected || _syncing) return;
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(syncUp, 1500);
 }
 
-// ── STUBS: swap these four for real Google API calls ──
+// Mirror the full transaction set up to the sheet (handles add/edit/delete uniformly)
+async function syncUp() {
+  if (!S.sync.connected || _syncing) return;
+  _syncing = true;
+  try {
+    const id = await ensureSpreadsheet();
+    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A:F:clear`, { method: "POST", body: "{}" });
+    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A1?valueInputOption=RAW`, {
+      method: "PUT", body: JSON.stringify({ values: txnsToRows() })
+    });
+    S.sync.lastSync = Date.now();
+    persist();
+    renderSync();
+  } catch (e) {
+    console.warn("[sync] syncUp failed:", e.message);
+  } finally {
+    _syncing = false;
+  }
+}
+
+// Read rows back from the sheet → transaction objects (fresh-device restore / merge)
+async function syncDown() {
+  if (!S.sync.connected) return [];
+  try {
+    const id = await ensureSpreadsheet();
+    const data = await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A2:F`);
+    return (data.values || [])
+      .map(r => ({
+        id: Date.now() + Math.random(),
+        date: String(r[0] || "").trim(),
+        type: String(r[1] || "").trim().toLowerCase(),
+        category: String(r[2] || "Others").trim(),
+        amount: parseFloat(r[3]) || 0,
+        note: String(r[5] || "").trim() || "Transaction",
+      }))
+      .filter(tx => tx.date && ["expense", "income", "savings"].includes(tx.type) && tx.amount > 0);
+  } catch (e) {
+    console.warn("[sync] syncDown failed:", e.message);
+    return [];
+  }
+}
+
 async function connectSheets() {
   closeOverlay("sync-overlay");
-  // TODO: GIS token client → create spreadsheet → capture id + account email
-  console.log("[sync] connectSheets() stub");
-  S.sync.connected     = true;
-  S.sync.email         = "you@gmail.com";        // TODO: real signed-in account
-  S.sync.spreadsheetId = "STUB_SHEET_ID";        // TODO: created spreadsheet id
-  S.sync.lastSync      = Date.now();
+  try {
+    await getToken(true); // account chooser + consent
+  } catch (e) {
+    console.warn("[sync] auth failed:", e);
+    alert("Google sign-in was cancelled or failed.");
+    return;
+  }
+  S.sync.connected = true;
+  try {
+    const info = await gapi("https://www.googleapis.com/oauth2/v3/userinfo");
+    S.sync.email = info.email || "Google account";
+  } catch { S.sync.email = "Google account"; }
   persist();
-  await syncUp();          // push existing local data up on first connect
-  renderSync(); renderSyncBanner();
-}
-
-async function syncUp() {
-  if (!S.sync.connected) return;
-  // TODO: Sheets API — append/update rows from S.transactions
-  console.log("[sync] syncUp() stub →", S.transactions.length, "rows");
-  S.sync.lastSync = Date.now();
-}
-
-async function syncDown() {
-  if (!S.sync.connected) return;
-  // TODO: Sheets API — read rows and merge into S.transactions (fresh device restore)
-  console.log("[sync] syncDown() stub");
+  // Merge anything already in the sheet with local data so nothing is lost on connect
+  try {
+    const remote = await syncDown();
+    if (remote.length) {
+      const seen = new Set(S.transactions.map(t => `${t.date}|${t.type}|${t.amount}|${t.note}`));
+      const add = remote.filter(t => !seen.has(`${t.date}|${t.type}|${t.amount}|${t.note}`));
+      if (add.length) { S.transactions = [...S.transactions, ...add]; persist(); }
+    }
+  } catch (e) { console.warn("[sync] initial pull failed:", e.message); }
+  await syncUp();
+  renderSync(); renderSyncBanner(); renderRecords(); updateHeader();
 }
 
 function disconnectSheets() {
   if (!confirm(t("sync.disconnect") + "?")) return;
-  // TODO: revoke the OAuth token
-  console.log("[sync] disconnectSheets() stub");
-  S.sync.connected = false;
-  S.sync.email = null;
-  S.sync.spreadsheetId = null;
+  if (accessToken && gisReady()) google.accounts.oauth2.revoke(accessToken, () => {});
+  accessToken = null; tokenExpiry = 0;
+  S.sync.connected = false; S.sync.email = null; S.sync.spreadsheetId = null;
   persist();
   renderSync(); renderSyncBanner();
 }
 
 function openSheet() {
-  if (S.sync.spreadsheetId && S.sync.spreadsheetId !== "STUB_SHEET_ID") {
+  if (S.sync.spreadsheetId) {
     window.open("https://docs.google.com/spreadsheets/d/" + S.sync.spreadsheetId, "_blank");
   } else {
-    alert("Your Google Sheet will open here once real sync is wired up.");
+    alert("Connect Google Sheets first.");
   }
 }
 
