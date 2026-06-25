@@ -191,6 +191,19 @@
     .sync-banner-btn { background: #007aff; color: #fff; border: none; padding: 6px 12px; border-radius: 7px; font-size: 13px; font-family: inherit; cursor: pointer; flex-shrink: 0; }
     .sync-banner-close { background: none; border: none; color: #b38f3a; font-size: 18px; cursor: pointer; padding: 0 4px; flex-shrink: 0; line-height: 1; }
 
+    /* Recurring "due" confirm sheet */
+    .recur-row { display: flex; align-items: center; gap: 10px; padding: 11px 4px; border-bottom: 1px solid #f3f3f3; cursor: pointer; }
+    .recur-row:last-child { border-bottom: none; }
+    .recur-cb { width: 18px; height: 18px; flex-shrink: 0; accent-color: #007aff; }
+    .recur-icon { font-size: 20px; flex-shrink: 0; }
+    .recur-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .recur-name { font-size: 14px; font-weight: 500; color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recur-meta { font-size: 12px; color: #999; margin-top: 1px; }
+    .recur-amt { font-size: 14px; font-weight: 700; flex-shrink: 0; }
+    .recur-amt.expense { color: #ff3b30; } .recur-amt.income { color: #34c759; } .recur-amt.savings { color: #007aff; }
+    .due-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px; border: none; border-radius: 12px; background: #fff4e0; color: #a8660a; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; margin-bottom: 4px; }
+    .due-btn:active { opacity: 0.85; }
+
     /* Modals */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center; z-index: 200; backdrop-filter: blur(2px); }
     .overlay.hidden { display: none; }
@@ -251,6 +264,7 @@
 
     <!-- FIXED -->
     <div id="tab-fixed" class="tab-panel">
+      <div id="fixed-due" style="padding:12px 16px 0"></div>
       <div class="section">
         <div class="section-title" id="ft-income-title">Recurring Income</div>
         <div id="fl-income"></div>
@@ -419,6 +433,46 @@
   </div>
 </div>
 
+<!-- Recurring items due — confirm sheet (hybrid) -->
+<div class="overlay hidden" id="recur-overlay" onclick="overlayClose(event,'recur-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="recur-title">Recurring items due</div>
+    <div class="modal-body"  id="recur-body">Tick the ones to record:</div>
+    <div id="recur-list" style="margin-top:8px"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="recur-later"  onclick="closeOverlay('recur-overlay')">Later</button>
+      <button class="btn btn-primary"   id="recur-record" onclick="recordDueFixed()">Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit transaction -->
+<div class="overlay hidden" id="edit-overlay" onclick="overlayClose(event,'edit-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="edit-title">Edit Record</div>
+    <div class="form-row">
+      <label class="form-lbl" id="eml-desc">Description</label>
+      <input class="form-input" id="e-note">
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="eml-amt">Amount</label>
+      <input class="form-input" id="e-amount" type="number" step="0.01" min="0">
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="eml-cat">Category</label>
+      <select class="form-select" id="e-cat"></select>
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="eml-date">Date</label>
+      <input class="form-input" id="e-date" type="date">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="eml-cancel" onclick="closeOverlay('edit-overlay')">Cancel</button>
+      <button class="btn btn-primary"   id="eml-save"   onclick="saveEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════
 // TRANSLATIONS
@@ -432,13 +486,14 @@ const LANG = {
       welcome: "Hey! Track your money here 😊\n\n💸 <b>Lunch 5</b> → Expense\n💰 <b>Salary 1200</b> → Income\n🏦 <b>Save bibd 500</b> → Savings\n🗑️ <b>Delete</b> → Remove last entry\n\nDate prefix: <b>Yesterday coffee 3</b> or <b>6/15 petrol 40</b>",
       nothingDelete: "Nothing to delete.",
       deleted: "Deleted",
-      editInfo: "To edit a record, go to <b>Records</b> tab, delete it, then re-enter.",
+      editInfo: "To edit, open the <b>Records</b> tab and tap the pencil on any entry.",
       unclear: "Hmm, I didn't catch that. Try: <b>Lunch 5</b> · <b>Salary 1200</b> · <b>Save bibd 500</b>",
     },
     fixed: {
       income: "Recurring Income", expense: "Recurring Expenses", savings: "Recurring Savings",
       addIncome: "＋ Add Income", addExpense: "＋ Add Expense", addSavings: "＋ Add Savings",
       dayLabel: "Monthly, day", autoAdded: "Auto-added recurring",
+      dueTitle: "Recurring items due", dueBody: "Tick the ones to record:", record: "Record", later: "Later",
     },
     stats: {
       spent: "Spent", earned: "Earned", saved: "Saved",
@@ -458,6 +513,7 @@ const LANG = {
     },
     modal: {
       addFixed: "Add Fixed Item", desc: "Description", amt: "Amount", cat: "Category", day: "Day of month",
+      editTitle: "Edit Record", date: "Date",
       cancel: "Cancel", save: "Save",
       importTitle: "Import Data", importBody: "Choose how to handle the imported data:",
       merge: "Merge with existing data", replace: "Replace all data",
@@ -487,13 +543,14 @@ const LANG = {
       welcome: "Hai! Rekod wang awak di sini 😊\n\n💸 <b>Makan 5</b> → Perbelanjaan\n💰 <b>Gaji 1200</b> → Pendapatan\n🏦 <b>Simpan bibd 500</b> → Simpanan\n🗑️ <b>Padam</b> → Buang rekod terkini\n\nAwalan tarikh: <b>Semalam kopi 3</b> atau <b>6/15 minyak 40</b>",
       nothingDelete: "Tiada rekod untuk dipadam.",
       deleted: "Dipadam",
-      editInfo: "Untuk edit, pergi ke tab <b>Sejarah</b>, padam rekod, kemudian masuk semula.",
+      editInfo: "Untuk edit, buka tab <b>Sejarah</b> dan tekan ikon pensel pada rekod.",
       unclear: "Hmm, saya tak faham. Cuba: <b>Makan 5</b> · <b>Gaji 1200</b> · <b>Simpan bibd 500</b>",
     },
     fixed: {
       income: "Pendapatan Tetap", expense: "Perbelanjaan Tetap", savings: "Simpanan Tetap",
       addIncome: "＋ Tambah Pendapatan", addExpense: "＋ Tambah Perbelanjaan", addSavings: "＋ Tambah Simpanan",
       dayLabel: "Bulanan, hari", autoAdded: "Ditambah automatik",
+      dueTitle: "Item tetap perlu direkod", dueBody: "Tanda yang ingin direkod:", record: "Rekod", later: "Nanti",
     },
     stats: {
       spent: "Dibelanja", earned: "Diterima", saved: "Disimpan",
@@ -513,6 +570,7 @@ const LANG = {
     },
     modal: {
       addFixed: "Tambah Item Tetap", desc: "Penerangan", amt: "Jumlah", cat: "Kategori", day: "Hari dalam bulan",
+      editTitle: "Edit Rekod", date: "Tarikh",
       cancel: "Batal", save: "Simpan",
       importTitle: "Import Data", importBody: "Pilih cara untuk import data:",
       merge: "Gabung dengan data sedia ada", replace: "Gantikan semua data",
@@ -542,13 +600,14 @@ const LANG = {
       welcome: "嗨！在这里记录收支 😊\n\n💸 <b>午餐 5</b> → 支出\n💰 <b>薪水 1200</b> → 收入\n🏦 <b>储蓄 bibd 500</b> → 存款\n🗑️ <b>删除</b> → 删除最近记录\n\n日期前缀：<b>昨天 咖啡 3</b> 或 <b>6/15 汽油 40</b>",
       nothingDelete: "没有可删除的记录。",
       deleted: "已删除",
-      editInfo: "如需修改，请到<b>记录</b>页面删除后重新输入。",
+      editInfo: "如需修改，请到<b>记录</b>页面点击任一记录上的铅笔图标。",
       unclear: "嗯，我没看懂。试试：<b>午餐 5</b> · <b>薪水 1200</b> · <b>储蓄 bibd 500</b>",
     },
     fixed: {
       income: "固定收入", expense: "固定支出", savings: "固定储蓄",
       addIncome: "＋ 添加收入", addExpense: "＋ 添加支出", addSavings: "＋ 添加储蓄",
       dayLabel: "每月", autoAdded: "已自动添加",
+      dueTitle: "固定项目待记录", dueBody: "勾选要记录的：", record: "记录", later: "稍后",
     },
     stats: {
       spent: "支出", earned: "收入", saved: "储蓄",
@@ -568,6 +627,7 @@ const LANG = {
     },
     modal: {
       addFixed: "添加固定项目", desc: "描述", amt: "金额", cat: "类别", day: "每月日期",
+      editTitle: "编辑记录", date: "日期",
       cancel: "取消", save: "保存",
       importTitle: "导入数据", importBody: "请选择导入方式：",
       merge: "与现有数据合并", replace: "替换所有数据",
@@ -1025,13 +1085,13 @@ function saveFixed() {
   S.fixedItems.push({ id:Date.now()+Math.random(), type:fixedType, note, amount, category:cat, day, active:true, createdY:now.getFullYear(), createdM:now.getMonth() });
   persist();
   closeOverlay("fixed-overlay");
-  applyFixedItems();   // post immediately if this month's day has already passed
   renderFixed();
+  maybePromptDueFixed();   // if this month's day already passed, offer to record it now
 }
 
 function toggleFixed(id) {
   const item = S.fixedItems.find(f=>f.id===id);
-  if (item) { item.active=!item.active; persist(); if (item.active) applyFixedItems(); renderFixed(); }
+  if (item) { item.active=!item.active; persist(); renderFixed(); if (item.active) maybePromptDueFixed(); }
 }
 
 function deleteFixed(id) {
@@ -1040,12 +1100,12 @@ function deleteFixed(id) {
   persist(); renderFixed();
 }
 
-// Catch-up scheduler: posts each active fixed item once per month (on its chosen day),
-// backfilling any months missed since it was last applied. Idempotent via item.lastApplied.
-function applyFixedItems() {
+// Hybrid recurring: detect which fixed-item postings are DUE (without mutating state),
+// then let the user confirm/uncheck them before they post. Backfills missed months.
+function computeDueFixed() {
   const now = new Date();
   const todayDay = now.getDate();
-  const posted = [];
+  const due = [];
   S.fixedItems.forEach(item => {
     if (!item.active) return;
     const day = item.day || 1;
@@ -1063,25 +1123,78 @@ function applyFixedItems() {
       if (isCurrentMonth && todayDay < day) break; // this month's day hasn't arrived yet
       const lastDay = new Date(y, mo + 1, 0).getDate();
       const useDay  = Math.min(day, lastDay); // clamp e.g. day 31 → Feb 28/29
-      const dateStr = `${y}-${String(mo + 1).padStart(2, "0")}-${String(useDay).padStart(2, "0")}`;
-      S.transactions.push({ id: Date.now() + Math.random(), type: item.type, amount: item.amount, date: dateStr, note: item.note, category: item.category });
-      item.lastApplied = `${y}-${String(mo + 1).padStart(2, "0")}`;
-      posted.push(item);
+      due.push({
+        itemId: item.id, item,
+        ym: `${y}-${String(mo + 1).padStart(2, "0")}`,
+        dateStr: `${y}-${String(mo + 1).padStart(2, "0")}-${String(useDay).padStart(2, "0")}`,
+      });
       cursor = new Date(y, mo + 1, 1);
     }
   });
+  return due;
+}
+
+// Show the confirm sheet if anything is due. Returns true if it opened.
+let _dueFixed = [];
+function maybePromptDueFixed() {
+  const due = computeDueFixed();
+  if (!due.length) return false;
+  _dueFixed = due;
+  document.getElementById("recur-title").textContent  = t("fixed.dueTitle");
+  document.getElementById("recur-body").textContent   = t("fixed.dueBody");
+  document.getElementById("recur-record").textContent = t("fixed.record");
+  document.getElementById("recur-later").textContent  = t("fixed.later");
+  document.getElementById("recur-list").innerHTML = due.map((d, i) => {
+    const c = catObj(d.item.type, d.item.category), sign = d.item.type === "expense" ? "−" : "+";
+    return `<label class="recur-row">
+      <input type="checkbox" class="recur-cb" data-i="${i}" checked>
+      <span class="recur-icon">${c.icon}</span>
+      <span class="recur-info">
+        <span class="recur-name">${esc(d.item.note)}</span>
+        <span class="recur-meta">${esc(catName(d.item.category))} · ${fmtDateShort(d.dateStr)}</span>
+      </span>
+      <span class="recur-amt ${d.item.type}">${sign}${fmt(d.item.amount)}</span>
+    </label>`;
+  }).join("");
+  document.getElementById("recur-overlay").classList.remove("hidden");
+  return true;
+}
+
+function recordDueFixed() {
+  const lastByItem = {};
+  const posted = [];
+  document.querySelectorAll("#recur-list .recur-cb").forEach(cb => {
+    const d = _dueFixed[parseInt(cb.dataset.i)];
+    if (!d) return;
+    if (cb.checked) {
+      S.transactions.push({ id: Date.now() + Math.random(), type: d.item.type, amount: d.item.amount, date: d.dateStr, note: d.item.note, category: d.item.category });
+      posted.push(d);
+    }
+    // mark this month handled for the item (checked = posted, unchecked = skipped) so it won't re-prompt
+    if (!lastByItem[d.itemId] || d.ym > lastByItem[d.itemId]) lastByItem[d.itemId] = d.ym;
+  });
+  Object.entries(lastByItem).forEach(([id, ym]) => {
+    const it = S.fixedItems.find(f => String(f.id) === String(id));
+    if (it) it.lastApplied = ym;
+  });
+  persist(); updateHeader();
+  closeOverlay("recur-overlay");
   if (posted.length) {
-    persist(); updateHeader();
-    const lines = posted.map(it => {
-      const c = catObj(it.type, it.category), sign = it.type === "expense" ? "−" : "+";
-      return `${c.icon} <b>${esc(it.note)}</b> ${sign}${fmt(it.amount)}`;
+    const lines = posted.map(d => {
+      const c = catObj(d.item.type, d.item.category), sign = d.item.type === "expense" ? "−" : "+";
+      return `${c.icon} <b>${esc(d.item.note)}</b> ${sign}${fmt(d.item.amount)}`;
     });
     pushMsg("system", `🔁 ${t("fixed.autoAdded")}:<br>` + lines.join("<br>"));
   }
-  return posted.length > 0;
+  renderCurrentTab();
 }
 
 function renderFixed() {
+  const dueEl = document.getElementById("fixed-due");
+  if (dueEl) {
+    const n = computeDueFixed().length;
+    dueEl.innerHTML = n ? `<button class="due-btn" onclick="maybePromptDueFixed()">🔁 ${t("fixed.record")} (${n})</button>` : "";
+  }
   ["income","expense","savings"].forEach(type => {
     const items = S.fixedItems.filter(f=>f.type===type);
     const el    = document.getElementById(`fl-${type}`);
@@ -1229,6 +1342,7 @@ function renderRecords() {
             <div class="rec-cat">${esc(catName(tx.category))}</div>
           </div>
           <div class="rec-amt ${tx.type}">${sign}${fmt(tx.amount)}</div>
+          <button class="icon-btn" style="color:#bbb" aria-label="Edit record" onclick="openEdit(${tx.id})"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
           <button class="icon-btn" aria-label="Delete record" onclick="deleteRecord(${tx.id})">×</button>
         </div>`;
       }).join("")}
@@ -1240,6 +1354,41 @@ function deleteRecord(id) {
   if (!confirm(t("deleteConfirm"))) return;
   S.transactions=S.transactions.filter(t=>t.id!==id);
   persist(); renderRecords(); updateHeader();
+}
+
+let editingId = null;
+function openEdit(id) {
+  const tx = S.transactions.find(t=>t.id===id);
+  if (!tx) return;
+  editingId = id;
+  document.getElementById("edit-title").textContent  = t("modal.editTitle");
+  document.getElementById("eml-desc").textContent    = t("modal.desc");
+  document.getElementById("eml-amt").textContent     = t("modal.amt");
+  document.getElementById("eml-cat").textContent     = t("modal.cat");
+  document.getElementById("eml-date").textContent    = t("modal.date");
+  document.getElementById("eml-cancel").textContent  = t("modal.cancel");
+  document.getElementById("eml-save").textContent    = t("modal.save");
+  document.getElementById("e-note").value   = tx.note;
+  document.getElementById("e-amount").value = tx.amount;
+  document.getElementById("e-date").value   = tx.date;
+  const cats = S.cats[tx.type] || {};
+  document.getElementById("e-cat").innerHTML =
+    Object.entries(cats).map(([n,{icon}])=>`<option value="${n}">${icon} ${catName(n)}</option>`).join("");
+  document.getElementById("e-cat").value = tx.category;
+  document.getElementById("edit-overlay").classList.remove("hidden");
+}
+function saveEdit() {
+  const tx = S.transactions.find(t=>t.id===editingId);
+  if (!tx) { closeOverlay("edit-overlay"); return; }
+  const note   = document.getElementById("e-note").value.trim();
+  const amount = parseFloat(document.getElementById("e-amount").value);
+  const cat    = document.getElementById("e-cat").value;
+  const date   = document.getElementById("e-date").value || tx.date;
+  if (!note || !amount || amount<=0) { alert(t("modal.desc")+" / "+t("modal.amt")); return; }
+  tx.note = note; tx.amount = amount; tx.category = cat; tx.date = date;
+  persist(); updateHeader();
+  closeOverlay("edit-overlay");
+  renderRecords();
 }
 
 // ═══════════════════════════════════════════
@@ -1577,13 +1726,13 @@ hydrate();
 document.querySelectorAll(".tab-panel").forEach(p=>{ p.style.display="none"; });
 document.getElementById("tab-track").style.display="flex";
 applyLang();
-applyFixedItems();   // post any recurring items due since last open
 renderMessages();
 updateHeader();
+maybePromptDueFixed();   // offer to record any recurring items due since last open
 
 // Re-check recurring items when the app returns to the foreground (e.g. across a day/month boundary)
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && applyFixedItems()) renderCurrentTab();
+  if (!document.hidden) maybePromptDueFixed();
 });
 
 // Ask the browser not to evict our data (helps prevent silent data loss on mobile)
