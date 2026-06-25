@@ -383,6 +383,10 @@
       <label class="form-lbl" id="fml-cat">Category</label>
       <select class="form-select" id="f-cat"></select>
     </div>
+    <div class="form-row">
+      <label class="form-lbl" id="fml-day">Day of month</label>
+      <select class="form-select" id="f-day"></select>
+    </div>
     <div class="btn-row">
       <button class="btn btn-secondary" id="fml-cancel" onclick="closeOverlay('fixed-overlay')">Cancel</button>
       <button class="btn btn-primary"   id="fml-save"   onclick="saveFixed()">Save</button>
@@ -434,6 +438,7 @@ const LANG = {
     fixed: {
       income: "Recurring Income", expense: "Recurring Expenses", savings: "Recurring Savings",
       addIncome: "＋ Add Income", addExpense: "＋ Add Expense", addSavings: "＋ Add Savings",
+      dayLabel: "Monthly, day", autoAdded: "Auto-added recurring",
     },
     stats: {
       spent: "Spent", earned: "Earned", saved: "Saved",
@@ -452,7 +457,7 @@ const LANG = {
       export: "Export to Excel", import: "Import from Excel", clear: "Clear All Data",
     },
     modal: {
-      addFixed: "Add Fixed Item", desc: "Description", amt: "Amount", cat: "Category",
+      addFixed: "Add Fixed Item", desc: "Description", amt: "Amount", cat: "Category", day: "Day of month",
       cancel: "Cancel", save: "Save",
       importTitle: "Import Data", importBody: "Choose how to handle the imported data:",
       merge: "Merge with existing data", replace: "Replace all data",
@@ -488,6 +493,7 @@ const LANG = {
     fixed: {
       income: "Pendapatan Tetap", expense: "Perbelanjaan Tetap", savings: "Simpanan Tetap",
       addIncome: "＋ Tambah Pendapatan", addExpense: "＋ Tambah Perbelanjaan", addSavings: "＋ Tambah Simpanan",
+      dayLabel: "Bulanan, hari", autoAdded: "Ditambah automatik",
     },
     stats: {
       spent: "Dibelanja", earned: "Diterima", saved: "Disimpan",
@@ -506,7 +512,7 @@ const LANG = {
       export: "Eksport ke Excel", import: "Import dari Excel", clear: "Padam Semua Data",
     },
     modal: {
-      addFixed: "Tambah Item Tetap", desc: "Penerangan", amt: "Jumlah", cat: "Kategori",
+      addFixed: "Tambah Item Tetap", desc: "Penerangan", amt: "Jumlah", cat: "Kategori", day: "Hari dalam bulan",
       cancel: "Batal", save: "Simpan",
       importTitle: "Import Data", importBody: "Pilih cara untuk import data:",
       merge: "Gabung dengan data sedia ada", replace: "Gantikan semua data",
@@ -542,6 +548,7 @@ const LANG = {
     fixed: {
       income: "固定收入", expense: "固定支出", savings: "固定储蓄",
       addIncome: "＋ 添加收入", addExpense: "＋ 添加支出", addSavings: "＋ 添加储蓄",
+      dayLabel: "每月", autoAdded: "已自动添加",
     },
     stats: {
       spent: "支出", earned: "收入", saved: "储蓄",
@@ -560,7 +567,7 @@ const LANG = {
       export: "导出至 Excel", import: "从 Excel 导入", clear: "清除所有数据",
     },
     modal: {
-      addFixed: "添加固定项目", desc: "描述", amt: "金额", cat: "类别",
+      addFixed: "添加固定项目", desc: "描述", amt: "金额", cat: "类别", day: "每月日期",
       cancel: "取消", save: "保存",
       importTitle: "导入数据", importBody: "请选择导入方式：",
       merge: "与现有数据合并", replace: "替换所有数据",
@@ -937,6 +944,7 @@ function applyLang() {
   document.getElementById("fml-desc").textContent   = L.modal.desc;
   document.getElementById("fml-amt").textContent    = L.modal.amt;
   document.getElementById("fml-cat").textContent    = L.modal.cat;
+  document.getElementById("fml-day").textContent    = L.modal.day;
   document.getElementById("fml-cancel").textContent = L.modal.cancel;
   document.getElementById("fml-save").textContent   = L.modal.save;
   document.getElementById("iml-title").textContent  = L.modal.importTitle;
@@ -997,6 +1005,9 @@ function openFixed(type) {
   const cats = S.cats[type];
   document.getElementById("f-cat").innerHTML =
     Object.entries(cats).map(([n,{icon}])=>`<option value="${n}">${icon} ${catName(n)}</option>`).join("");
+  const daySel = document.getElementById("f-day");
+  daySel.innerHTML = Array.from({length:31}, (_,i)=>`<option value="${i+1}">${i+1}</option>`).join("");
+  daySel.value = String(new Date().getDate());
   document.getElementById("fixed-overlay").classList.remove("hidden");
   document.getElementById("f-note").focus();
 }
@@ -1008,22 +1019,66 @@ function saveFixed() {
   const note   = document.getElementById("f-note").value.trim();
   const amount = parseFloat(document.getElementById("f-amount").value);
   const cat    = document.getElementById("f-cat").value;
+  const day    = parseInt(document.getElementById("f-day").value) || 1;
   if (!note || !amount || amount<=0) { alert(t("modal.desc")+" / "+t("modal.amt")); return; }
-  S.fixedItems.push({ id:Date.now()+Math.random(), type:fixedType, note, amount, category:cat, active:true });
+  const now = new Date();
+  S.fixedItems.push({ id:Date.now()+Math.random(), type:fixedType, note, amount, category:cat, day, active:true, createdY:now.getFullYear(), createdM:now.getMonth() });
   persist();
   closeOverlay("fixed-overlay");
+  applyFixedItems();   // post immediately if this month's day has already passed
   renderFixed();
 }
 
 function toggleFixed(id) {
   const item = S.fixedItems.find(f=>f.id===id);
-  if (item) { item.active=!item.active; persist(); renderFixed(); }
+  if (item) { item.active=!item.active; persist(); if (item.active) applyFixedItems(); renderFixed(); }
 }
 
 function deleteFixed(id) {
   if (!confirm(t("fixedDeleteConfirm"))) return;
   S.fixedItems = S.fixedItems.filter(f=>f.id!==id);
   persist(); renderFixed();
+}
+
+// Catch-up scheduler: posts each active fixed item once per month (on its chosen day),
+// backfilling any months missed since it was last applied. Idempotent via item.lastApplied.
+function applyFixedItems() {
+  const now = new Date();
+  const todayDay = now.getDate();
+  const posted = [];
+  S.fixedItems.forEach(item => {
+    if (!item.active) return;
+    const day = item.day || 1;
+    let cursor;
+    if (item.lastApplied) {
+      const [y, m] = item.lastApplied.split("-").map(Number); // m is 1-based → new Date(y,m,1) is the NEXT month
+      cursor = new Date(y, m, 1);
+    } else {
+      cursor = new Date(item.createdY ?? now.getFullYear(), item.createdM ?? now.getMonth(), 1);
+    }
+    while (cursor.getFullYear() < now.getFullYear() ||
+          (cursor.getFullYear() === now.getFullYear() && cursor.getMonth() <= now.getMonth())) {
+      const y = cursor.getFullYear(), mo = cursor.getMonth();
+      const isCurrentMonth = (y === now.getFullYear() && mo === now.getMonth());
+      if (isCurrentMonth && todayDay < day) break; // this month's day hasn't arrived yet
+      const lastDay = new Date(y, mo + 1, 0).getDate();
+      const useDay  = Math.min(day, lastDay); // clamp e.g. day 31 → Feb 28/29
+      const dateStr = `${y}-${String(mo + 1).padStart(2, "0")}-${String(useDay).padStart(2, "0")}`;
+      S.transactions.push({ id: Date.now() + Math.random(), type: item.type, amount: item.amount, date: dateStr, note: item.note, category: item.category });
+      item.lastApplied = `${y}-${String(mo + 1).padStart(2, "0")}`;
+      posted.push(item);
+      cursor = new Date(y, mo + 1, 1);
+    }
+  });
+  if (posted.length) {
+    persist(); updateHeader();
+    const lines = posted.map(it => {
+      const c = catObj(it.type, it.category), sign = it.type === "expense" ? "−" : "+";
+      return `${c.icon} <b>${esc(it.note)}</b> ${sign}${fmt(it.amount)}`;
+    });
+    pushMsg("system", `🔁 ${t("fixed.autoAdded")}:<br>` + lines.join("<br>"));
+  }
+  return posted.length > 0;
 }
 
 function renderFixed() {
@@ -1036,7 +1091,7 @@ function renderFixed() {
         <div class="fixed-icon">${cat.icon}</div>
         <div class="fixed-info">
           <div class="fixed-name">${esc(item.note)}</div>
-          <div class="fixed-sub">${esc(catName(item.category))}</div>
+          <div class="fixed-sub">${esc(catName(item.category))} · ${t("fixed.dayLabel")} ${item.day||1}</div>
         </div>
         <div class="fixed-amount ${type}">${fmt(item.amount)}</div>
         <div class="toggle-wrap">
@@ -1522,8 +1577,14 @@ hydrate();
 document.querySelectorAll(".tab-panel").forEach(p=>{ p.style.display="none"; });
 document.getElementById("tab-track").style.display="flex";
 applyLang();
+applyFixedItems();   // post any recurring items due since last open
 renderMessages();
 updateHeader();
+
+// Re-check recurring items when the app returns to the foreground (e.g. across a day/month boundary)
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && applyFixedItems()) renderCurrentTab();
+});
 
 // Ask the browser not to evict our data (helps prevent silent data loss on mobile)
 if (navigator.storage && navigator.storage.persist) {
