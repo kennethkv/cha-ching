@@ -99,7 +99,8 @@
     .bal-name { flex: 1; font-size: 14px; color: #1a1a1a; }
     .bal-amt { font-size: 14px; font-weight: 700; color: #1a1a1a; }
     .bal-amt.savings { color: #007aff; }
-    .bal-add { display: block; width: calc(100% - 32px); margin: 8px 16px; padding: 10px; border: 2px dashed #ddd; border-radius: 12px; background: none; color: #007aff; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer; }
+    .bal-actions { display: flex; gap: 8px; padding: 8px 16px; }
+    .bal-add { flex: 1; display: block; padding: 10px; border: 2px dashed #ddd; border-radius: 12px; background: none; color: #007aff; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer; }
     .bal-add:hover { border-color: #007aff; }
 
     /* Shared */
@@ -487,6 +488,29 @@
   </div>
 </div>
 
+<!-- Transfer between accounts -->
+<div class="overlay hidden" id="transfer-overlay" onclick="overlayClose(event,'transfer-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="transfer-title">Transfer</div>
+    <div class="form-row">
+      <label class="form-lbl" id="tml-from">From</label>
+      <select class="form-select" id="tr-from"></select>
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="tml-to">To</label>
+      <select class="form-select" id="tr-to"></select>
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="tml-amt">Amount</label>
+      <input class="form-input" id="tr-amount" type="number" step="0.01" min="0" placeholder="0.00">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="tml-cancel" onclick="closeOverlay('transfer-overlay')">Cancel</button>
+      <button class="btn btn-primary"   id="tml-save"   onclick="saveTransfer()">Transfer</button>
+    </div>
+  </div>
+</div>
+
 <!-- Edit transaction -->
 <div class="overlay hidden" id="edit-overlay" onclick="overlayClose(event,'edit-overlay')">
   <div class="modal" onclick="event.stopPropagation()">
@@ -527,6 +551,8 @@ const LANG = {
       acctName: "Account name", balance: "Current balance",
       newAccount: "Add Account", editAccount: "Account",
       deleteBtn: "Delete account", deleteAccount: "Delete this account?",
+      transfer: "Transfer", from: "From", to: "To",
+      sameAccount: "Pick two different accounts.", needTwo: "Add a second account first.",
     },
     tabs: { track:"Track", fixed:"Fixed", stats:"Stats", records:"Records", settings:"Settings" },
     track: {
@@ -591,6 +617,8 @@ const LANG = {
       acctName: "Nama akaun", balance: "Baki semasa",
       newAccount: "Tambah Akaun", editAccount: "Akaun",
       deleteBtn: "Padam akaun", deleteAccount: "Padam akaun ini?",
+      transfer: "Pindahan", from: "Dari", to: "Ke",
+      sameAccount: "Pilih dua akaun berbeza.", needTwo: "Tambah akaun kedua dahulu.",
     },
     tabs: { track:"Rekod", fixed:"Tetap", stats:"Statistik", records:"Sejarah", settings:"Tetapan" },
     track: {
@@ -655,6 +683,8 @@ const LANG = {
       acctName: "账户名称", balance: "当前余额",
       newAccount: "添加账户", editAccount: "账户",
       deleteBtn: "删除账户", deleteAccount: "确定删除此账户？",
+      transfer: "转账", from: "从", to: "到",
+      sameAccount: "请选择两个不同的账户。", needTwo: "请先添加第二个账户。",
     },
     tabs: { track:"记账", fixed:"固定", stats:"统计", records:"记录", settings:"设置" },
     track: {
@@ -1321,7 +1351,14 @@ function fmtBal(n) { return `${n<0?"-":""}${S.currency} ${Math.abs(n).toFixed(2)
 function txEffect(tx) { return tx.type === "income" ? tx.amount : -tx.amount; } // expense & savings leave the source
 function accountBalance(acc) {
   let b = acc.baseline || 0;
-  for (const tx of S.transactions) if (tx.source === acc.id) b += txEffect(tx);
+  for (const tx of S.transactions) {
+    if (tx.type === "transfer") {
+      if (tx.from === acc.id) b -= tx.amount;
+      if (tx.to   === acc.id) b += tx.amount;
+    } else if (tx.source === acc.id) {
+      b += txEffect(tx);
+    }
+  }
   return b;
 }
 function investedTotals() {
@@ -1379,8 +1416,43 @@ function renderBalances() {
     </div>
     <div class="bal-group-title">${t("bal.accounts")}</div>
     ${accRows}
-    <button class="bal-add" onclick="openAcct(null)">${t("bal.addAccount")}</button>
+    <div class="bal-actions">
+      <button class="bal-add" onclick="openAcct(null)">${t("bal.addAccount")}</button>
+      <button class="bal-add" onclick="openTransfer()">⇄ ${t("bal.transfer")}</button>
+    </div>
     ${invRows ? `<div class="bal-group-title">${t("bal.invested")}</div>${invRows}` : ""}`;
+}
+
+function openTransfer() {
+  if (S.accounts.length < 2) { alert(t("bal.needTwo")); return; }
+  const opts = S.accounts.map(a => `<option value="${a.id}">${a.icon} ${esc(a.name)}</option>`).join("");
+  document.getElementById("tr-from").innerHTML = opts;
+  document.getElementById("tr-to").innerHTML   = opts;
+  document.getElementById("tr-from").value = S.currentSource || S.accounts[0].id;
+  const other = S.accounts.find(a => a.id !== document.getElementById("tr-from").value);
+  document.getElementById("tr-to").value = (other || S.accounts[0]).id;
+  document.getElementById("tr-amount").value = "";
+  document.getElementById("transfer-title").textContent = t("bal.transfer");
+  document.getElementById("tml-from").textContent = t("bal.from");
+  document.getElementById("tml-to").textContent   = t("bal.to");
+  document.getElementById("tml-amt").textContent  = t("modal.amt");
+  document.getElementById("tml-cancel").textContent = t("modal.cancel");
+  document.getElementById("tml-save").textContent   = t("bal.transfer");
+  document.getElementById("transfer-overlay").classList.remove("hidden");
+}
+function saveTransfer() {
+  const from = document.getElementById("tr-from").value;
+  const to   = document.getElementById("tr-to").value;
+  const amount = parseFloat(document.getElementById("tr-amount").value);
+  if (!(amount > 0)) { alert(t("modal.amt")); return; }
+  if (from === to) { alert(t("bal.sameAccount")); return; }
+  const fa = S.accounts.find(a => a.id === from), ta = S.accounts.find(a => a.id === to);
+  S.transactions.push({ id: Date.now() + Math.random(), type: "transfer", amount, date: todayStr(),
+    from, to, category: "Transfer", note: `${fa?.name || "?"} → ${ta?.name || "?"}` });
+  persist();
+  closeOverlay("transfer-overlay");
+  renderBalances();
+  if (document.querySelector(".tab.active")?.dataset?.tab === "records") renderRecords();
 }
 
 let editingAcct = null;
@@ -1526,6 +1598,18 @@ function renderRecords() {
     return `<div class="rec-group">
       <div class="rec-date-label">${label}</div>
       ${items.map(tx=>{
+        if (tx.type==="transfer") {
+          const fa=S.accounts.find(a=>a.id===tx.from), ta=S.accounts.find(a=>a.id===tx.to);
+          return `<div class="rec-item">
+            <div class="rec-icon">⇄</div>
+            <div class="rec-info">
+              <div class="rec-note">${esc(t("bal.transfer"))}</div>
+              <div class="rec-cat">${esc((fa?.name||"?")+" → "+(ta?.name||"?"))}</div>
+            </div>
+            <div class="rec-amt" style="color:#888">${fmt(tx.amount)}</div>
+            <button class="icon-btn" aria-label="Delete record" onclick="deleteRecord(${tx.id})">×</button>
+          </div>`;
+        }
         const cat=catObj(tx.type,tx.category), sign=tx.type==="expense"?"−":"+";
         return `<div class="rec-item">
           <div class="rec-icon">${cat.icon}</div>
@@ -1813,7 +1897,7 @@ async function ensureSpreadsheet() {
 
 function txnsToRows() {
   const header = ["Date", "Type", "Category", "Amount", "Currency", "Note"];
-  return [header, ...S.transactions.map(tx => [tx.date, tx.type, tx.category, tx.amount, S.currency, tx.note])];
+  return [header, ...S.transactions.filter(tx => tx.type !== "transfer").map(tx => [tx.date, tx.type, tx.category, tx.amount, S.currency, tx.note])];
 }
 
 // Debounced local-first sync — called from persist() on every state change
