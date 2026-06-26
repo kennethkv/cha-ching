@@ -461,7 +461,7 @@
     <div class="modal-body"  id="recur-body">Tick the ones to record:</div>
     <div id="recur-list" style="margin-top:8px"></div>
     <div class="btn-row">
-      <button class="btn btn-secondary" id="recur-later"  onclick="closeOverlay('recur-overlay')">Later</button>
+      <button class="btn btn-secondary" id="recur-later"  onclick="snoozeRecur()">Later</button>
       <button class="btn btn-primary"   id="recur-record" onclick="recordDueFixed()">Record</button>
     </div>
   </div>
@@ -1159,12 +1159,12 @@ function saveFixed() {
   persist();
   closeOverlay("fixed-overlay");
   renderFixed();
-  maybePromptDueFixed();   // if this month's day already passed, offer to record it now
+  maybePromptDueFixed(true);   // if this month's day already passed, offer to record it now
 }
 
 function toggleFixed(id) {
   const item = S.fixedItems.find(f=>f.id===id);
-  if (item) { item.active=!item.active; persist(); renderFixed(); if (item.active) maybePromptDueFixed(); }
+  if (item) { item.active=!item.active; persist(); renderFixed(); if (item.active) maybePromptDueFixed(true); }
 }
 
 function deleteFixed(id) {
@@ -1209,7 +1209,10 @@ function computeDueFixed() {
 
 // Show the confirm sheet if anything is due. Returns true if it opened.
 let _dueFixed = [];
-function maybePromptDueFixed() {
+let _recurSnoozed = false; // "Later" suppresses auto-prompts for this session (until next reopen)
+function snoozeRecur() { _recurSnoozed = true; closeOverlay("recur-overlay"); }
+function maybePromptDueFixed(force) {
+  if (!force && _recurSnoozed) return false;
   const due = computeDueFixed();
   if (!due.length) return false;
   _dueFixed = due;
@@ -1266,7 +1269,7 @@ function renderFixed() {
   const dueEl = document.getElementById("fixed-due");
   if (dueEl) {
     const n = computeDueFixed().length;
-    dueEl.innerHTML = n ? `<button class="due-btn" onclick="maybePromptDueFixed()">🔁 ${t("fixed.record")} (${n})</button>` : "";
+    dueEl.innerHTML = n ? `<button class="due-btn" onclick="maybePromptDueFixed(true)">🔁 ${t("fixed.record")} (${n})</button>` : "";
   }
   ["income","expense","savings"].forEach(type => {
     const items = S.fixedItems.filter(f=>f.type===type);
