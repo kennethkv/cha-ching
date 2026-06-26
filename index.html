@@ -85,6 +85,22 @@
     .quick-chips::-webkit-scrollbar { display: none; }
     .quick-chip { padding: 7px 14px; border-radius: 16px; border: 1px solid #e2e2e2; background: #f8f8f8; font-size: 13px; color: #444; white-space: nowrap; flex-shrink: 0; cursor: pointer; font-family: inherit; transition: all 0.15s; }
     .quick-chip:active { background: #eef4ff; border-color: #007aff; color: #007aff; }
+    /* Payment source selector */
+    .source-row { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; flex-shrink: 0; }
+    .source-lbl { font-size: 12px; color: #999; flex-shrink: 0; }
+    .source-sel { flex: 1; max-width: 200px; border: 1px solid #e2e2e2; border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #f8f8f8; color: #1a1a1a; font-family: inherit; outline: none; cursor: pointer; }
+    /* Balances (top of Stats) */
+    .bal-nw { background: #007aff; color: #fff; border-radius: 14px; margin: 14px 16px 6px; padding: 16px; text-align: center; }
+    .bal-nw-label { font-size: 11px; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.5px; }
+    .bal-nw-val { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .bal-group-title { font-size: 11px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.6px; padding: 10px 16px 4px; }
+    .bal-row { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid #f5f5f5; cursor: pointer; }
+    .bal-icon { font-size: 20px; flex-shrink: 0; }
+    .bal-name { flex: 1; font-size: 14px; color: #1a1a1a; }
+    .bal-amt { font-size: 14px; font-weight: 700; color: #1a1a1a; }
+    .bal-amt.savings { color: #007aff; }
+    .bal-add { display: block; width: calc(100% - 32px); margin: 8px 16px; padding: 10px; border: 2px dashed #ddd; border-radius: 12px; background: none; color: #007aff; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer; }
+    .bal-add:hover { border-color: #007aff; }
 
     /* Shared */
     .section { padding: 14px 16px; }
@@ -256,6 +272,10 @@
       <div id="sync-banner" class="sync-banner" style="display:none"></div>
       <div class="messages" id="messages"></div>
       <div class="quick-chips" id="quick-chips"></div>
+      <div class="source-row">
+        <span class="source-lbl" id="src-label">Paid from</span>
+        <select class="source-sel" id="src-sel" onchange="onSourceChange(this.value)"></select>
+      </div>
       <div class="input-area">
         <textarea id="inp" rows="1" aria-label="Add a transaction" onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
         <button class="send-btn" aria-label="Send" onclick="submit()">↑</button>
@@ -284,6 +304,7 @@
 
     <!-- STATS -->
     <div id="tab-stats" class="tab-panel">
+      <div id="balances"></div>
       <div class="period-bar">
         <button class="period-btn active" id="pb-week"  onclick="setPeriod('week',this)">Week</button>
         <button class="period-btn"        id="pb-month" onclick="setPeriod('month',this)">Month</button>
@@ -446,6 +467,26 @@
   </div>
 </div>
 
+<!-- Add / edit account -->
+<div class="overlay hidden" id="acct-overlay" onclick="overlayClose(event,'acct-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="acct-title">Account</div>
+    <div class="form-row">
+      <label class="form-lbl" id="aml-name">Account name</label>
+      <input class="form-input" id="a-name" placeholder="e.g. BIBD">
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="aml-bal">Current balance</label>
+      <input class="form-input" id="a-bal" type="number" step="0.01" placeholder="0.00">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="aml-cancel" onclick="closeOverlay('acct-overlay')">Cancel</button>
+      <button class="btn btn-primary"   id="aml-save"   onclick="saveAcct()">Save</button>
+    </div>
+    <button class="btn btn-danger" id="aml-delete" style="margin-top:10px;display:none" onclick="deleteAcct()">Delete account</button>
+  </div>
+</div>
+
 <!-- Edit transaction -->
 <div class="overlay hidden" id="edit-overlay" onclick="overlayClose(event,'edit-overlay')">
   <div class="modal" onclick="event.stopPropagation()">
@@ -480,6 +521,13 @@
 const LANG = {
   en: {
     headerLabel: "TODAY'S SPENDING",
+    bal: {
+      netWorth: "Net Worth", accounts: "Accounts", invested: "Invested",
+      addAccount: "＋ Add account", paidFrom: "Paid from",
+      acctName: "Account name", balance: "Current balance",
+      newAccount: "Add Account", editAccount: "Account",
+      deleteBtn: "Delete account", deleteAccount: "Delete this account?",
+    },
     tabs: { track:"Track", fixed:"Fixed", stats:"Stats", records:"Records", settings:"Settings" },
     track: {
       placeholder: "Lunch 5 / Salary 1200 / Save bibd 500",
@@ -537,6 +585,13 @@ const LANG = {
   },
   ms: {
     headerLabel: "PERBELANJAAN HARI INI",
+    bal: {
+      netWorth: "Nilai Bersih", accounts: "Akaun", invested: "Pelaburan",
+      addAccount: "＋ Tambah akaun", paidFrom: "Bayar dari",
+      acctName: "Nama akaun", balance: "Baki semasa",
+      newAccount: "Tambah Akaun", editAccount: "Akaun",
+      deleteBtn: "Padam akaun", deleteAccount: "Padam akaun ini?",
+    },
     tabs: { track:"Rekod", fixed:"Tetap", stats:"Statistik", records:"Sejarah", settings:"Tetapan" },
     track: {
       placeholder: "Makan 5 / Gaji 1200 / Simpan bibd 500",
@@ -594,6 +649,13 @@ const LANG = {
   },
   zh: {
     headerLabel: "今日支出",
+    bal: {
+      netWorth: "净资产", accounts: "账户", invested: "投资",
+      addAccount: "＋ 添加账户", paidFrom: "付款来源",
+      acctName: "账户名称", balance: "当前余额",
+      newAccount: "添加账户", editAccount: "账户",
+      deleteBtn: "删除账户", deleteAccount: "确定删除此账户？",
+    },
     tabs: { track:"记账", fixed:"固定", stats:"统计", records:"记录", settings:"设置" },
     track: {
       placeholder: "午餐 5 / 薪水 1200 / 储蓄 bibd 500",
@@ -740,6 +802,11 @@ let S = {
     savings: deepClone(DEF_SAVINGS),
   },
   sync: { connected:false, email:null, spreadsheetId:null, lastSync:null, bannerDismissed:false },
+  accounts: [
+    { id:"acc_bank", name:"Bank", icon:"🏦", baseline:0 },
+    { id:"acc_cash", name:"Cash", icon:"💵", baseline:0 },
+  ],
+  currentSource: "acc_bank",
 };
 
 let period    = "month";
@@ -760,6 +827,8 @@ function persist() {
     lang:         S.lang,
     cats:         S.cats,
     sync:         S.sync,
+    accounts:      S.accounts,
+    currentSource: S.currentSource,
   }));
   queueSync();
 }
@@ -779,6 +848,8 @@ function hydrate() {
       S.cats.savings = { ...deepClone(DEF_SAVINGS), ...d.cats.savings };
     }
     if (d.sync) S.sync = { ...S.sync, ...d.sync };
+    if (Array.isArray(d.accounts) && d.accounts.length) S.accounts = d.accounts;
+    if (d.currentSource) S.currentSource = d.currentSource;
   } catch(e) { console.warn("hydrate:", e); }
 }
 
@@ -879,7 +950,7 @@ function submit() {
   }
   if (p.cmd === "edit") { pushMsg("system", t("track.editInfo")); return; }
 
-  const txn = { id: Date.now()+Math.random(), ...p };
+  const txn = { id: Date.now()+Math.random(), ...p, source: S.currentSource };
   S.transactions.push(txn);
   persist(); updateHeader(); renderSyncBanner();
 
@@ -966,6 +1037,8 @@ function applyLang() {
   document.getElementById("inp").placeholder = L.track.placeholder;
   renderTrackChips();
   renderSyncBanner();
+  document.getElementById("src-label").textContent = L.bal.paidFrom;
+  renderSourceSel();
   // Stats labels
   document.getElementById("sl-expense").textContent = L.stats.spent;
   document.getElementById("sl-income").textContent  = L.stats.earned;
@@ -1167,7 +1240,7 @@ function recordDueFixed() {
     const d = _dueFixed[parseInt(cb.dataset.i)];
     if (!d) return;
     if (cb.checked) {
-      S.transactions.push({ id: Date.now() + Math.random(), type: d.item.type, amount: d.item.amount, date: d.dateStr, note: d.item.note, category: d.item.category });
+      S.transactions.push({ id: Date.now() + Math.random(), type: d.item.type, amount: d.item.amount, date: d.dateStr, note: d.item.note, category: d.item.category, source: S.currentSource });
       posted.push(d);
     }
     // mark this month handled for the item (checked = posted, unchecked = skipped) so it won't re-prompt
@@ -1238,7 +1311,123 @@ function txnsInPeriod() {
   });
 }
 
+// ═══════════════════════════════════════════
+// ACCOUNTS & BALANCES (asset accounts; each transaction carries a source)
+// ═══════════════════════════════════════════
+function fmtBal(n) { return `${n<0?"-":""}${S.currency} ${Math.abs(n).toFixed(2)}`; }
+function txEffect(tx) { return tx.type === "income" ? tx.amount : -tx.amount; } // expense & savings leave the source
+function accountBalance(acc) {
+  let b = acc.baseline || 0;
+  for (const tx of S.transactions) if (tx.source === acc.id) b += txEffect(tx);
+  return b;
+}
+function investedTotals() {
+  const m = {};
+  S.transactions.filter(t => t.type === "savings").forEach(t => { m[t.category] = (m[t.category] || 0) + t.amount; });
+  return m;
+}
+function netWorth() {
+  const assets = S.accounts.reduce((s, a) => s + accountBalance(a), 0);
+  const invested = Object.values(investedTotals()).reduce((s, v) => s + v, 0);
+  return assets + invested;
+}
+function iconForAccount(name, fallback) {
+  const n = name.toLowerCase();
+  if (/cash|tunai|现金|wallet|dompet/.test(n)) return "💵";
+  if (/dst|e-?wallet/.test(n)) return "📱";
+  if (/card|kad|信用|debit/.test(n)) return "💳";
+  return fallback || "🏦";
+}
+
+function renderSourceSel() {
+  const sel = document.getElementById("src-sel");
+  if (!sel) return;
+  if (!S.accounts.find(a => a.id === S.currentSource)) S.currentSource = S.accounts[0]?.id;
+  sel.innerHTML = S.accounts.map(a => `<option value="${a.id}">${a.icon} ${esc(a.name)}</option>`).join("")
+    + `<option value="__add">${t("bal.addAccount")}</option>`;
+  sel.value = S.currentSource;
+}
+function onSourceChange(v) {
+  if (v === "__add") { document.getElementById("src-sel").value = S.currentSource; openAcct(null); return; }
+  S.currentSource = v; persist();
+}
+
+function renderBalances() {
+  const el = document.getElementById("balances");
+  if (!el) return;
+  const accRows = S.accounts.map(a => `
+    <div class="bal-row" onclick="openAcct('${a.id}')">
+      <span class="bal-icon">${a.icon}</span>
+      <span class="bal-name">${esc(a.name)}</span>
+      <span class="bal-amt">${fmtBal(accountBalance(a))}</span>
+    </div>`).join("");
+  const invRows = Object.entries(investedTotals()).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
+    const c = catObj("savings", cat);
+    return `<div class="bal-row" style="cursor:default">
+      <span class="bal-icon">${c.icon}</span>
+      <span class="bal-name">${esc(catName(cat))}</span>
+      <span class="bal-amt savings">${fmtBal(amt)}</span>
+    </div>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="bal-nw">
+      <div class="bal-nw-label">${t("bal.netWorth")}</div>
+      <div class="bal-nw-val">${fmtBal(netWorth())}</div>
+    </div>
+    <div class="bal-group-title">${t("bal.accounts")}</div>
+    ${accRows}
+    <button class="bal-add" onclick="openAcct(null)">${t("bal.addAccount")}</button>
+    ${invRows ? `<div class="bal-group-title">${t("bal.invested")}</div>${invRows}` : ""}`;
+}
+
+let editingAcct = null;
+function openAcct(id) {
+  editingAcct = id;
+  const acc = id ? S.accounts.find(a => a.id === id) : null;
+  document.getElementById("acct-title").textContent  = t(acc ? "bal.editAccount" : "bal.newAccount");
+  document.getElementById("aml-name").textContent    = t("bal.acctName");
+  document.getElementById("aml-bal").textContent     = t("bal.balance");
+  document.getElementById("aml-cancel").textContent  = t("modal.cancel");
+  document.getElementById("aml-save").textContent    = t("modal.save");
+  document.getElementById("aml-delete").textContent  = t("bal.deleteBtn");
+  document.getElementById("aml-delete").style.display = acc ? "block" : "none";
+  document.getElementById("a-name").value = acc ? acc.name : "";
+  document.getElementById("a-bal").value  = acc ? accountBalance(acc).toFixed(2) : "";
+  document.getElementById("acct-overlay").classList.remove("hidden");
+  if (!acc) document.getElementById("a-name").focus();
+}
+function saveAcct() {
+  const name = document.getElementById("a-name").value.trim();
+  const bal  = parseFloat(document.getElementById("a-bal").value);
+  if (!name || isNaN(bal)) { alert(t("bal.acctName") + " / " + t("bal.balance")); return; }
+  if (editingAcct) {
+    const acc = S.accounts.find(a => a.id === editingAcct);
+    if (acc) {
+      const effects = accountBalance(acc) - (acc.baseline || 0); // sum of tagged transactions
+      acc.name = name;
+      acc.icon = iconForAccount(name, acc.icon);
+      acc.baseline = bal - effects; // re-baseline so the shown balance equals what you typed
+    }
+  } else {
+    const id = "acc_" + Date.now();
+    S.accounts.push({ id, name, icon: iconForAccount(name, "🏦"), baseline: bal });
+    S.currentSource = id;
+  }
+  persist();
+  closeOverlay("acct-overlay");
+  renderSourceSel(); renderBalances();
+}
+function deleteAcct() {
+  if (!editingAcct || !confirm(t("bal.deleteAccount"))) return;
+  S.accounts = S.accounts.filter(a => a.id !== editingAcct);
+  if (S.currentSource === editingAcct) S.currentSource = S.accounts[0]?.id || null;
+  persist();
+  closeOverlay("acct-overlay");
+  renderSourceSel(); renderBalances();
+}
+
 function renderStats() {
+  renderBalances();
   const txns = txnsInPeriod();
   const exp  = txns.filter(t=>t.type==="expense");
   const inc  = txns.filter(t=>t.type==="income");
