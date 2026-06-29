@@ -85,6 +85,10 @@
     .quick-chips::-webkit-scrollbar { display: none; }
     .quick-chip { padding: 7px 14px; border-radius: 16px; border: 1px solid #e2e2e2; background: #f8f8f8; font-size: 13px; color: #444; white-space: nowrap; flex-shrink: 0; cursor: pointer; font-family: inherit; transition: all 0.15s; }
     .quick-chip:active { background: #eef4ff; border-color: #007aff; color: #007aff; }
+    /* Category picker chips */
+    .cat-pick-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .cat-pick-chip { padding: 8px 12px; border-radius: 18px; border: 1px solid #e2e2e2; background: #f8f8f8; font-size: 13px; color: #333; font-family: inherit; cursor: pointer; }
+    .cat-pick-chip:active { background: #eef4ff; border-color: #007aff; color: #007aff; }
     /* Payment source selector */
     .source-row { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; flex-shrink: 0; }
     .source-lbl { font-size: 12px; color: #999; flex-shrink: 0; }
@@ -488,6 +492,15 @@
   </div>
 </div>
 
+<!-- Category picker (asked only when auto-detect is unsure) -->
+<div class="overlay hidden" id="cat-overlay" onclick="overlayClose(event,'cat-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="cat-pick-title">Which category?</div>
+    <div class="modal-body"  id="cat-pick-preview"></div>
+    <div class="cat-pick-grid" id="cat-pick-list"></div>
+  </div>
+</div>
+
 <!-- Transfer between accounts -->
 <div class="overlay hidden" id="transfer-overlay" onclick="overlayClose(event,'transfer-overlay')">
   <div class="modal" onclick="event.stopPropagation()">
@@ -562,6 +575,7 @@ const LANG = {
       deleted: "Deleted",
       editInfo: "To edit, open the <b>Records</b> tab and tap the pencil on any entry.",
       unclear: "Hmm, I didn't catch that. Try: <b>Lunch 5</b> · <b>Salary 1200</b> · <b>Save bibd 500</b>",
+      whichCat: "Which category?",
     },
     fixed: {
       income: "Recurring Income", expense: "Recurring Expenses", savings: "Recurring Savings",
@@ -628,6 +642,7 @@ const LANG = {
       deleted: "Dipadam",
       editInfo: "Untuk edit, buka tab <b>Sejarah</b> dan tekan ikon pensel pada rekod.",
       unclear: "Hmm, saya tak faham. Cuba: <b>Makan 5</b> · <b>Gaji 1200</b> · <b>Simpan bibd 500</b>",
+      whichCat: "Kategori mana?",
     },
     fixed: {
       income: "Pendapatan Tetap", expense: "Perbelanjaan Tetap", savings: "Simpanan Tetap",
@@ -694,6 +709,7 @@ const LANG = {
       deleted: "已删除",
       editInfo: "如需修改，请到<b>记录</b>页面点击任一记录上的铅笔图标。",
       unclear: "嗯，我没看懂。试试：<b>午餐 5</b> · <b>薪水 1200</b> · <b>储蓄 bibd 500</b>",
+      whichCat: "归到哪个分类？",
     },
     fixed: {
       income: "固定收入", expense: "固定支出", savings: "固定储蓄",
@@ -941,8 +957,8 @@ function parse(raw) {
 
   // Savings trigger keywords (all languages)
   if (/\b(save|saving|deposit|tabung|simpan|储蓄|存钱|存款|积蓄)\b/.test(loRest)) {
-    const cat = detectCat(loRest, S.cats.savings) || "BIBD";
-    return { type:"savings", amount, date, note, category:cat };
+    const sav = detectCat(loRest, S.cats.savings);
+    return { type:"savings", amount, date, note, category: sav || "BIBD", needCat: !sav };
   }
 
   // Income
@@ -954,8 +970,8 @@ function parse(raw) {
   if (savCat) return { type:"savings", amount, date, note, category:savCat };
 
   // Default: expense
-  const expCat = detectCat(loRest, S.cats.expense) || "Others";
-  return { type:"expense", amount, date, note, category:expCat };
+  const expCat = detectCat(loRest, S.cats.expense);
+  return { type:"expense", amount, date, note, category: expCat || "Others", needCat: !expCat };
 }
 
 // ═══════════════════════════════════════════
@@ -980,7 +996,13 @@ function submit() {
   }
   if (p.cmd === "edit") { pushMsg("system", t("track.editInfo")); return; }
 
-  const txn = { id: Date.now()+Math.random(), ...p, source: S.currentSource };
+  if (p.needCat) { openCatPicker(p); return; } // couldn't confidently detect → ask
+  postParsed(p);
+}
+
+function postParsed(p) {
+  const { needCat, ...clean } = p;
+  const txn = { id: Date.now()+Math.random(), ...clean, source: S.currentSource };
   S.transactions.push(txn);
   persist(); updateHeader(); renderSyncBanner();
 
@@ -991,6 +1013,26 @@ function submit() {
      ${esc(p.note)}<br>
      <div class="msg-meta">${t(`types.${p.type}`)} · ${esc(catName(p.category))} · ${fmtDateShort(p.date)}</div>`
   );
+}
+
+// Hybrid categorisation: only ask when auto-detect was unsure (would land in "Others"/default)
+let pendingTxn = null, _catKeys = [];
+function openCatPicker(p) {
+  pendingTxn = p;
+  const cats = S.cats[p.type] || S.cats.expense;
+  _catKeys = Object.keys(cats);
+  document.getElementById("cat-pick-title").textContent   = t("track.whichCat");
+  document.getElementById("cat-pick-preview").textContent = `${p.note} · ${fmt(p.amount)}`;
+  document.getElementById("cat-pick-list").innerHTML = _catKeys.map((n, i) =>
+    `<button class="cat-pick-chip" onclick="pickCat(${i})">${catObj(p.type, n).icon} ${esc(catName(n))}</button>`).join("");
+  document.getElementById("cat-overlay").classList.remove("hidden");
+}
+function pickCat(i) {
+  if (!pendingTxn) return;
+  const p = pendingTxn; pendingTxn = null;
+  p.category = _catKeys[i] || "Others";
+  closeOverlay("cat-overlay");
+  postParsed(p);
 }
 
 function onKey(e) { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }
