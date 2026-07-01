@@ -483,6 +483,13 @@
       <input class="form-input" id="a-name" placeholder="e.g. BIBD">
     </div>
     <div class="form-row">
+      <label class="form-lbl" id="aml-kind">Type</label>
+      <div class="seg-ctrl">
+        <button type="button" class="seg-btn active" id="ak-asset"  onclick="setAcctKind('asset')">Asset</button>
+        <button type="button" class="seg-btn"        id="ak-invest" onclick="setAcctKind('investment')">Investment</button>
+      </div>
+    </div>
+    <div class="form-row">
       <label class="form-lbl" id="aml-bal">Current balance</label>
       <input class="form-input" id="a-bal" type="number" step="0.01" placeholder="0.00">
     </div>
@@ -568,6 +575,7 @@ const LANG = {
       deleteBtn: "Delete account", deleteAccount: "Delete this account?",
       transfer: "Transfer", from: "From", to: "To",
       sameAccount: "Pick two different accounts.", needTwo: "Add a second account first.",
+      type: "Type", kindAsset: "Asset", kindInvest: "Investment",
     },
     tabs: { track:"Track", fixed:"Fixed", stats:"Stats", records:"Records", settings:"Settings" },
     track: {
@@ -608,7 +616,7 @@ const LANG = {
       importTitle: "Import Data", importBody: "Choose how to handle the imported data:",
       merge: "Merge with existing data", replace: "Replace all data",
     },
-    types: { expense: "Expense", income: "Income", savings: "Savings" },
+    types: { expense: "Expense", income: "Income", savings: "Savings", gain: "Gain" },
     deleteConfirm: "Delete this record?",
     clearConfirm: "This will permanently delete ALL transactions. Continue?",
     fixedDeleteConfirm: "Delete this recurring item?",
@@ -636,6 +644,7 @@ const LANG = {
       deleteBtn: "Padam akaun", deleteAccount: "Padam akaun ini?",
       transfer: "Pindahan", from: "Dari", to: "Ke",
       sameAccount: "Pilih dua akaun berbeza.", needTwo: "Tambah akaun kedua dahulu.",
+      type: "Jenis", kindAsset: "Aset", kindInvest: "Pelaburan",
     },
     tabs: { track:"Rekod", fixed:"Tetap", stats:"Statistik", records:"Sejarah", settings:"Tetapan" },
     track: {
@@ -676,7 +685,7 @@ const LANG = {
       importTitle: "Import Data", importBody: "Pilih cara untuk import data:",
       merge: "Gabung dengan data sedia ada", replace: "Gantikan semua data",
     },
-    types: { expense: "Perbelanjaan", income: "Pendapatan", savings: "Simpanan" },
+    types: { expense: "Perbelanjaan", income: "Pendapatan", savings: "Simpanan", gain: "Pulangan" },
     deleteConfirm: "Padam rekod ini?",
     clearConfirm: "Ini akan memadam SEMUA rekod. Teruskan?",
     fixedDeleteConfirm: "Padam item tetap ini?",
@@ -704,6 +713,7 @@ const LANG = {
       deleteBtn: "删除账户", deleteAccount: "确定删除此账户？",
       transfer: "转账", from: "从", to: "到",
       sameAccount: "请选择两个不同的账户。", needTwo: "请先添加第二个账户。",
+      type: "类型", kindAsset: "资产", kindInvest: "投资",
     },
     tabs: { track:"记账", fixed:"固定", stats:"统计", records:"记录", settings:"设置" },
     track: {
@@ -744,7 +754,7 @@ const LANG = {
       importTitle: "导入数据", importBody: "请选择导入方式：",
       merge: "与现有数据合并", replace: "替换所有数据",
     },
-    types: { expense: "支出", income: "收入", savings: "储蓄" },
+    types: { expense: "支出", income: "收入", savings: "储蓄", gain: "收益" },
     deleteConfirm: "确定删除此记录？",
     clearConfirm: "这将永久删除所有记录，确定继续？",
     fixedDeleteConfirm: "确定删除此固定项目？",
@@ -854,8 +864,8 @@ let S = {
   },
   sync: { connected:false, email:null, spreadsheetId:null, lastSync:null, bannerDismissed:false },
   accounts: [
-    { id:"acc_bank", name:"Bank", icon:"🏦", baseline:0 },
-    { id:"acc_cash", name:"Cash", icon:"💵", baseline:0 },
+    { id:"acc_bank", name:"Bank", icon:"🏦", baseline:0, kind:"asset" },
+    { id:"acc_cash", name:"Cash", icon:"💵", baseline:0, kind:"asset" },
   ],
   currentSource: "acc_bank",
 };
@@ -960,6 +970,15 @@ function parse(raw) {
   const note   = rest.replace(amtM[0],"").trim().replace(/\s+/g," ") || "Transaction";
   const loRest = rest.toLowerCase();
 
+  // Investment gain / reinvested dividend — credits an investment account, no source deducted
+  if (/\b(dividend|dividen|reinvest|gain|payout|股息|派息|利息|分红|再投资|收益)\b/.test(loRest)) {
+    const invs = S.accounts.filter(a => a.kind === "investment");
+    if (invs.length) {
+      const acct = invs.find(a => loRest.includes((a.matchCat || a.name).toLowerCase()) || loRest.includes(a.name.toLowerCase())) || invs[0];
+      return { type:"gain", amount, date, note, account: acct.id };
+    }
+  }
+
   // Savings trigger keywords (all languages)
   if (/\b(save|saving|deposit|tabung|simpan|储蓄|存钱|存款|积蓄)\b/.test(loRest)) {
     const sav = detectCat(loRest, S.cats.savings);
@@ -1007,10 +1026,19 @@ function submit() {
 
 function postParsed(p) {
   const { needCat, ...clean } = p;
-  const txn = { id: Date.now()+Math.random(), ...clean, source: S.currentSource };
+  const txn = { id: Date.now()+Math.random(), ...clean };
+  if (p.type !== "gain") txn.source = S.currentSource; // gains have no paying account
   S.transactions.push(txn);
   persist(); updateHeader(); renderSyncBanner();
 
+  if (p.type === "gain") {
+    const acc = S.accounts.find(a => a.id === p.account);
+    pushMsg("savings",
+      `📈 <span class="msg-amount">+${fmt(p.amount)}</span><br>
+       ${esc(p.note)}<br>
+       <div class="msg-meta">${t("types.gain")} · ${esc(acc?.name || "")} · ${fmtDateShort(p.date)}</div>`);
+    return;
+  }
   const cat  = catObj(p.type, p.category);
   const sign = p.type === "expense" ? "−" : "+";
   pushMsg(p.type,
@@ -1398,25 +1426,31 @@ function fmtBal(n) { return `${n<0?"-":""}${S.currency} ${Math.abs(n).toFixed(2)
 function txEffect(tx) { return tx.type === "income" ? tx.amount : -tx.amount; } // expense & savings leave the source
 function accountBalance(acc) {
   let b = acc.baseline || 0;
+  const isInv = acc.kind === "investment";
   for (const tx of S.transactions) {
     if (tx.type === "transfer") {
       if (tx.from === acc.id) b -= tx.amount;
       if (tx.to   === acc.id) b += tx.amount;
+    } else if (tx.type === "gain") {
+      if (tx.account === acc.id) b += tx.amount;            // reinvested dividend / growth — no counterparty
+    } else if (isInv && tx.type === "savings" && tx.category === acc.matchCat) {
+      b += tx.amount;                                       // a savings deposit credits its investment account
     } else if (tx.source === acc.id) {
-      b += txEffect(tx);
+      b += txEffect(tx);                                    // and debits the paying (asset) account
     }
   }
   return b;
 }
-function investedTotals() {
-  const m = {};
-  S.transactions.filter(t => t.type === "savings").forEach(t => { m[t.category] = (m[t.category] || 0) + t.amount; });
-  return m;
-}
-function netWorth() {
-  const assets = S.accounts.reduce((s, a) => s + accountBalance(a), 0);
-  const invested = Object.values(investedTotals()).reduce((s, v) => s + v, 0);
-  return assets + invested;
+function netWorth() { return S.accounts.reduce((s, a) => s + accountBalance(a), 0); }
+
+// Auto-create an investment account for each savings category in use, so those deposits credit somewhere
+function ensureInvestAccounts() {
+  [...new Set(S.transactions.filter(t => t.type === "savings").map(t => t.category))].forEach(cat => {
+    if (!S.accounts.some(a => a.kind === "investment" && a.matchCat === cat)) {
+      S.accounts.push({ id: "inv_" + Date.now() + "_" + Math.floor(Math.random()*10000),
+        name: cat, icon: catObj("savings", cat).icon, baseline: 0, kind: "investment", matchCat: cat });
+    }
+  });
 }
 function iconForAccount(name, fallback) {
   const n = name.toLowerCase();
@@ -1429,8 +1463,9 @@ function iconForAccount(name, fallback) {
 function renderSourceSel() {
   const sel = document.getElementById("src-sel");
   if (!sel) return;
-  if (!S.accounts.find(a => a.id === S.currentSource)) S.currentSource = S.accounts[0]?.id;
-  sel.innerHTML = S.accounts.map(a => `<option value="${a.id}">${a.icon} ${esc(a.name)}</option>`).join("")
+  const assets = S.accounts.filter(a => a.kind !== "investment"); // only pay from asset accounts
+  if (!assets.find(a => a.id === S.currentSource)) S.currentSource = assets[0]?.id;
+  sel.innerHTML = assets.map(a => `<option value="${a.id}">${a.icon} ${esc(a.name)}</option>`).join("")
     + `<option value="__add">${t("bal.addAccount")}</option>`;
   sel.value = S.currentSource;
 }
@@ -1442,32 +1477,26 @@ function onSourceChange(v) {
 function renderBalances() {
   const el = document.getElementById("balances");
   if (!el) return;
-  const accRows = S.accounts.map(a => `
+  const rowsFor = list => list.map(a => `
     <div class="bal-row" onclick="openAcct('${a.id}')">
       <span class="bal-icon">${a.icon}</span>
       <span class="bal-name">${esc(a.name)}</span>
-      <span class="bal-amt">${fmtBal(accountBalance(a))}</span>
+      <span class="bal-amt${a.kind === "investment" ? " savings" : ""}">${fmtBal(accountBalance(a))}</span>
     </div>`).join("");
-  const invRows = Object.entries(investedTotals()).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
-    const c = catObj("savings", cat);
-    return `<div class="bal-row" style="cursor:default">
-      <span class="bal-icon">${c.icon}</span>
-      <span class="bal-name">${esc(catName(cat))}</span>
-      <span class="bal-amt savings">${fmtBal(amt)}</span>
-    </div>`;
-  }).join("");
+  const assets = S.accounts.filter(a => a.kind !== "investment");
+  const invs   = S.accounts.filter(a => a.kind === "investment");
   el.innerHTML = `
     <div class="bal-nw">
       <div class="bal-nw-label">${t("bal.netWorth")}</div>
       <div class="bal-nw-val">${fmtBal(netWorth())}</div>
     </div>
     <div class="bal-group-title">${t("bal.accounts")}</div>
-    ${accRows}
+    ${rowsFor(assets)}
     <div class="bal-actions">
       <button class="bal-add" onclick="openAcct(null)">${t("bal.addAccount")}</button>
       <button class="bal-add" onclick="openTransfer()">⇄ ${t("bal.transfer")}</button>
     </div>
-    ${invRows ? `<div class="bal-group-title">${t("bal.invested")}</div>${invRows}` : ""}`;
+    ${invs.length ? `<div class="bal-group-title">${t("bal.invested")}</div>${rowsFor(invs)}` : ""}`;
 }
 
 function openTransfer() {
@@ -1502,12 +1531,20 @@ function saveTransfer() {
   if (document.querySelector(".tab.active")?.dataset?.tab === "records") renderRecords();
 }
 
-let editingAcct = null;
+let editingAcct = null, acctKind = "asset";
+function setAcctKind(k) {
+  acctKind = k;
+  document.getElementById("ak-asset").classList.toggle("active", k === "asset");
+  document.getElementById("ak-invest").classList.toggle("active", k === "investment");
+}
 function openAcct(id) {
   editingAcct = id;
   const acc = id ? S.accounts.find(a => a.id === id) : null;
   document.getElementById("acct-title").textContent  = t(acc ? "bal.editAccount" : "bal.newAccount");
   document.getElementById("aml-name").textContent    = t("bal.acctName");
+  document.getElementById("aml-kind").textContent    = t("bal.type");
+  document.getElementById("ak-asset").textContent    = t("bal.kindAsset");
+  document.getElementById("ak-invest").textContent   = t("bal.kindInvest");
   document.getElementById("aml-bal").textContent     = t("bal.balance");
   document.getElementById("aml-cancel").textContent  = t("modal.cancel");
   document.getElementById("aml-save").textContent    = t("modal.save");
@@ -1515,6 +1552,7 @@ function openAcct(id) {
   document.getElementById("aml-delete").style.display = acc ? "block" : "none";
   document.getElementById("a-name").value = acc ? acc.name : "";
   document.getElementById("a-bal").value  = acc ? accountBalance(acc).toFixed(2) : "";
+  setAcctKind(acc ? (acc.kind || "asset") : "asset");
   document.getElementById("acct-overlay").classList.remove("hidden");
   if (!acc) document.getElementById("a-name").focus();
 }
@@ -1528,12 +1566,16 @@ function saveAcct() {
       const effects = accountBalance(acc) - (acc.baseline || 0); // sum of tagged transactions
       acc.name = name;
       acc.icon = iconForAccount(name, acc.icon);
+      acc.kind = acctKind;
+      if (acctKind === "investment" && !acc.matchCat) acc.matchCat = name;
       acc.baseline = bal - effects; // re-baseline so the shown balance equals what you typed
     }
   } else {
-    const id = "acc_" + Date.now();
-    S.accounts.push({ id, name, icon: iconForAccount(name, "🏦"), baseline: bal });
-    S.currentSource = id;
+    const id = (acctKind === "investment" ? "inv_" : "acc_") + Date.now();
+    const a = { id, name, icon: iconForAccount(name, acctKind === "investment" ? "📊" : "🏦"), baseline: bal, kind: acctKind };
+    if (acctKind === "investment") a.matchCat = name;
+    S.accounts.push(a);
+    if (acctKind !== "investment") S.currentSource = id; // only asset accounts are payment sources
   }
   persist();
   closeOverlay("acct-overlay");
@@ -1645,6 +1687,18 @@ function renderRecords() {
     return `<div class="rec-group">
       <div class="rec-date-label">${label}</div>
       ${items.map(tx=>{
+        if (tx.type==="gain") {
+          const ga=S.accounts.find(a=>a.id===tx.account);
+          return `<div class="rec-item">
+            <div class="rec-icon">📈</div>
+            <div class="rec-info">
+              <div class="rec-note">${esc(tx.note)}</div>
+              <div class="rec-cat">${esc(t("types.gain"))} · ${esc(ga?.name||"")}</div>
+            </div>
+            <div class="rec-amt savings">+${fmt(tx.amount)}</div>
+            <button class="icon-btn" aria-label="Delete record" onclick="deleteRecord(${tx.id})">×</button>
+          </div>`;
+        }
         if (tx.type==="transfer") {
           const fa=S.accounts.find(a=>a.id===tx.from), ta=S.accounts.find(a=>a.id===tx.to);
           return `<div class="rec-item">
@@ -1952,7 +2006,7 @@ async function ensureSpreadsheet() {
 
 function txnsToRows() {
   const header = ["Date", "Type", "Category", "Amount", "Currency", "Note"];
-  return [header, ...S.transactions.filter(tx => tx.type !== "transfer").map(tx => [tx.date, tx.type, tx.category, tx.amount, S.currency, tx.note])];
+  return [header, ...S.transactions.filter(tx => tx.type !== "transfer" && tx.type !== "gain").map(tx => [tx.date, tx.type, tx.category, tx.amount, S.currency, tx.note])];
 }
 
 // Debounced local-first sync — called from persist() on every state change
@@ -2084,6 +2138,7 @@ function openSheet() {
 // INIT
 // ═══════════════════════════════════════════
 hydrate();
+ensureInvestAccounts();   // create investment accounts for any savings categories in use
 document.querySelectorAll(".tab-panel").forEach(p=>{ p.style.display="none"; });
 document.getElementById("tab-track").style.display="flex";
 applyLang();
