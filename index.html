@@ -1950,6 +1950,7 @@ const GOOGLE_CLIENT_ID = "646841870267-dpkp35nin2vpker9e173ravu9rt9h9lp.apps.goo
 const GOOGLE_SCOPE     = "https://www.googleapis.com/auth/drive.file openid email";
 const SHEET_TITLE      = "Cha-Ching Data";
 const SHEET_TAB        = "Transactions";
+const ACCT_TAB         = "Accounts";
 
 let tokenClient = null, accessToken = null, tokenExpiry = 0;
 
@@ -1992,21 +1993,55 @@ async function gapi(url, opts = {}) {
 
 // Find the app's existing sheet (drive.file only ever lists files this app created) or create one
 async function ensureSpreadsheet() {
-  if (S.sync.spreadsheetId) return S.sync.spreadsheetId;
-  const q = encodeURIComponent(`name='${SHEET_TITLE}' and trashed=false`);
-  const list = await gapi(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`);
-  if (list.files && list.files.length) { S.sync.spreadsheetId = list.files[0].id; persist(); return S.sync.spreadsheetId; }
-  const created = await gapi("https://sheets.googleapis.com/v4/spreadsheets", {
-    method: "POST",
-    body: JSON.stringify({ properties: { title: SHEET_TITLE }, sheets: [{ properties: { title: SHEET_TAB } }] })
-  });
-  S.sync.spreadsheetId = created.spreadsheetId; persist();
+  if (!S.sync.spreadsheetId) {
+    const q = encodeURIComponent(`name='${SHEET_TITLE}' and trashed=false`);
+    const list = await gapi(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`);
+    if (list.files && list.files.length) {
+      S.sync.spreadsheetId = list.files[0].id;
+    } else {
+      const created = await gapi("https://sheets.googleapis.com/v4/spreadsheets", {
+        method: "POST",
+        body: JSON.stringify({ properties: { title: SHEET_TITLE }, sheets: [{ properties: { title: SHEET_TAB } }, { properties: { title: ACCT_TAB } }] })
+      });
+      S.sync.spreadsheetId = created.spreadsheetId;
+    }
+    persist();
+  }
+  await ensureTabs(S.sync.spreadsheetId); // add any missing tabs to a pre-existing sheet (once per session)
   return S.sync.spreadsheetId;
 }
 
+// Older sheets only have the Transactions tab — add Accounts (and Transactions) if missing.
+let _tabsEnsured = false;
+async function ensureTabs(id) {
+  if (_tabsEnsured) return;
+  const meta = await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=sheets.properties.title`);
+  const have = new Set((meta.sheets || []).map(s => s.properties.title));
+  const need = [SHEET_TAB, ACCT_TAB].filter(tab => !have.has(tab));
+  if (need.length) {
+    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: need.map(title => ({ addSheet: { properties: { title } } })) })
+    });
+  }
+  _tabsEnsured = true;
+}
+
+// The ledger tab now carries every type: flows keep Source; transfers add From/To; gains add Account.
 function txnsToRows() {
-  const header = ["Date", "Type", "Category", "Amount", "Currency", "Note"];
-  return [header, ...S.transactions.filter(tx => tx.type !== "transfer" && tx.type !== "gain").map(tx => [tx.date, tx.type, tx.category, tx.amount, S.currency, tx.note])];
+  const header = ["Date", "Type", "Category", "Amount", "Currency", "Note", "From", "To", "Account", "Source"];
+  return [header, ...S.transactions.map(tx => [
+    tx.date, tx.type, tx.category || "", tx.amount, S.currency, tx.note || "",
+    tx.from || "", tx.to || "", tx.account || "", tx.source || ""
+  ])];
+}
+
+// The Accounts tab mirrors S.accounts so ids (and thus transfer/gain links) survive a wipe.
+function acctsToRows() {
+  const header = ["Id", "Name", "Icon", "Kind", "MatchCat", "Baseline"];
+  return [header, ...S.accounts.map(a => [
+    a.id, a.name, a.icon || "", a.kind || "asset", a.matchCat || "", a.baseline || 0
+  ])];
 }
 
 // Debounced local-first sync — called from persist() on every state change
@@ -2024,9 +2059,15 @@ async function syncUp() {
   try {
     await ensureToken(); // fail fast on auth so we never half-clear the sheet
     const id = await ensureSpreadsheet();
-    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A:F:clear`, { method: "POST", body: "{}" });
+    // Ledger tab (all transaction types, columns A:J)
+    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A:J:clear`, { method: "POST", body: "{}" });
     await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A1?valueInputOption=RAW`, {
       method: "PUT", body: JSON.stringify({ values: txnsToRows() })
+    });
+    // Accounts tab (id/name/icon/kind/matchCat/baseline, columns A:F)
+    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${ACCT_TAB}!A:F:clear`, { method: "POST", body: "{}" });
+    await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${ACCT_TAB}!A1?valueInputOption=RAW`, {
+      method: "PUT", body: JSON.stringify({ values: acctsToRows() })
     });
     S.sync.lastSync = Date.now();
     syncNeedsReconnect = false;
@@ -2067,25 +2108,53 @@ async function reconnectSync() {
   }
 }
 
-// Read rows back from the sheet → transaction objects (fresh-device restore / merge)
+// Read both tabs back from the sheet → { transactions, accounts } (fresh-device restore / merge)
 async function syncDown() {
-  if (!S.sync.connected) return [];
+  if (!S.sync.connected) return { transactions: [], accounts: [] };
   try {
     const id = await ensureSpreadsheet();
-    const data = await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A2:F`);
-    return (data.values || [])
+    const [txData, acctData] = await Promise.all([
+      gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A2:J`),
+      gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${ACCT_TAB}!A2:F`).catch(() => ({ values: [] })),
+    ]);
+    const transactions = (txData.values || [])
+      .map(r => {
+        const type = String(r[1] || "").trim().toLowerCase();
+        const tx = {
+          id: Date.now() + Math.random(),
+          date: String(r[0] || "").trim(),
+          type,
+          amount: parseFloat(r[3]) || 0,
+          note: String(r[5] || "").trim() || "Transaction",
+        };
+        if (type === "transfer") {
+          tx.category = "Transfer";
+          tx.from = String(r[6] || "").trim();
+          tx.to   = String(r[7] || "").trim();
+        } else if (type === "gain") {
+          tx.account = String(r[8] || "").trim();
+        } else {
+          tx.category = String(r[2] || "Others").trim();
+          const src = String(r[9] || "").trim();
+          if (src) tx.source = src; // keep the paying account so asset balances restore correctly
+        }
+        return tx;
+      })
+      .filter(tx => tx.date && ["expense", "income", "savings", "transfer", "gain"].includes(tx.type) && tx.amount > 0);
+    const accounts = (acctData.values || [])
       .map(r => ({
-        id: Date.now() + Math.random(),
-        date: String(r[0] || "").trim(),
-        type: String(r[1] || "").trim().toLowerCase(),
-        category: String(r[2] || "Others").trim(),
-        amount: parseFloat(r[3]) || 0,
-        note: String(r[5] || "").trim() || "Transaction",
+        id:       String(r[0] || "").trim(),
+        name:     String(r[1] || "").trim(),
+        icon:     String(r[2] || "").trim() || "🏦",
+        kind:     String(r[3] || "asset").trim().toLowerCase() === "investment" ? "investment" : "asset",
+        matchCat: String(r[4] || "").trim() || undefined,
+        baseline: parseFloat(r[5]) || 0,
       }))
-      .filter(tx => tx.date && ["expense", "income", "savings"].includes(tx.type) && tx.amount > 0);
+      .filter(a => a.id && a.name);
+    return { transactions, accounts };
   } catch (e) {
     console.warn("[sync] syncDown failed:", e.message);
-    return [];
+    return { transactions: [], accounts: [] };
   }
 }
 
@@ -2107,20 +2176,31 @@ async function connectSheets() {
   // Merge anything already in the sheet with local data so nothing is lost on connect
   try {
     const remote = await syncDown();
-    if (remote.length) {
-      const seen = new Set(S.transactions.map(t => `${t.date}|${t.type}|${t.amount}|${t.note}`));
-      const add = remote.filter(t => !seen.has(`${t.date}|${t.type}|${t.amount}|${t.note}`));
-      if (add.length) { S.transactions = [...S.transactions, ...add]; persist(); }
+    // Accounts: upsert by id — remote fields (incl. baseline) win for matching ids so a
+    // wiped device restores real balances; local-only accounts are kept.
+    if (remote.accounts.length) {
+      const byId = new Map(S.accounts.map(a => [a.id, a]));
+      for (const ra of remote.accounts) byId.set(ra.id, { ...(byId.get(ra.id) || {}), ...ra });
+      S.accounts = [...byId.values()];
     }
+    // Transactions: union (append-only), keyed on all identifying fields across types.
+    if (remote.transactions.length) {
+      const key = t => `${t.date}|${t.type}|${t.amount}|${t.note}|${t.from || ""}|${t.to || ""}|${t.account || ""}|${t.source || ""}`;
+      const seen = new Set(S.transactions.map(key));
+      const add = remote.transactions.filter(t => !seen.has(key(t)));
+      if (add.length) S.transactions = [...S.transactions, ...add];
+    }
+    ensureInvestAccounts(); // backfill an investment account for any restored savings category still missing one
+    persist();
   } catch (e) { console.warn("[sync] initial pull failed:", e.message); }
   await syncUp();
-  renderSync(); renderSyncBanner(); renderRecords(); updateHeader();
+  renderSync(); renderSyncBanner(); renderRecords(); renderBalances(); renderSourceSel(); updateHeader();
 }
 
 function disconnectSheets() {
   if (!confirm(t("sync.disconnect") + "?")) return;
   if (accessToken && gisReady()) google.accounts.oauth2.revoke(accessToken, () => {});
-  accessToken = null; tokenExpiry = 0;
+  accessToken = null; tokenExpiry = 0; _tabsEnsured = false;
   S.sync.connected = false; S.sync.email = null; S.sync.spreadsheetId = null;
   persist();
   renderSync(); renderSyncBanner();
