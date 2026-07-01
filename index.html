@@ -1954,6 +1954,28 @@ const ACCT_TAB         = "Accounts";
 
 let tokenClient = null, accessToken = null, tokenExpiry = 0;
 
+// Cache the OAuth access token on-device so reopening the app within its ~1h lifetime
+// doesn't trigger another sign-in. Safe here: iOS home-screen web apps keep localStorage
+// across launches, the token is disposable (also expires ~1h server-side), and this is a
+// single-user app on the user's own device. Cleared on disconnect.
+const TOKEN_KEY = "cha-ching-token";
+function loadCachedToken() {
+  try {
+    const c = JSON.parse(localStorage.getItem(TOKEN_KEY) || "null");
+    if (c && c.token && c.expiry && Date.now() < c.expiry) { accessToken = c.token; tokenExpiry = c.expiry; }
+  } catch (e) { console.warn("[sync] token cache load:", e); }
+}
+function saveCachedToken() {
+  try {
+    if (accessToken && tokenExpiry) localStorage.setItem(TOKEN_KEY, JSON.stringify({ token: accessToken, expiry: tokenExpiry }));
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (e) { console.warn("[sync] token cache save:", e); }
+}
+function clearCachedToken() {
+  accessToken = null; tokenExpiry = 0;
+  try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+}
+
 function gisReady() { return !!(window.google && google.accounts && google.accounts.oauth2); }
 async function waitForGis(ms = 6000) {
   const start = Date.now();
@@ -1974,6 +1996,7 @@ async function getToken(interactive) {
       if (resp.error) { reject(new Error(resp.error)); return; }
       accessToken = resp.access_token;
       tokenExpiry = Date.now() + ((resp.expires_in || 3600) * 1000) - 60000;
+      saveCachedToken(); // survive reloads / app relaunches within the token's lifetime
       resolve(accessToken);
     };
     tokenClient.error_callback = err => reject(err);
@@ -2082,12 +2105,13 @@ async function syncUp() {
   }
 }
 
-// Called on app load when already "connected": try to silently restore the token
-// (works when the Google session is still valid) and flush; otherwise show Reconnect.
+// Called on app load when already "connected": reuse the cached token if it's still
+// valid, else try a silent refresh (works when the Google session is still valid), then
+// flush; otherwise show Reconnect.
 async function resumeSync() {
   if (!S.sync.connected) return;
   try {
-    await getToken(false); // best-effort silent — no popup
+    await ensureToken(); // cached token if still valid, else best-effort silent refresh — no popup
     await syncUp();
   } catch (e) {
     console.warn("[sync] resume needs reconnect:", e.message || e);
@@ -2200,7 +2224,7 @@ async function connectSheets() {
 function disconnectSheets() {
   if (!confirm(t("sync.disconnect") + "?")) return;
   if (accessToken && gisReady()) google.accounts.oauth2.revoke(accessToken, () => {});
-  accessToken = null; tokenExpiry = 0; _tabsEnsured = false;
+  clearCachedToken(); _tabsEnsured = false;
   S.sync.connected = false; S.sync.email = null; S.sync.spreadsheetId = null;
   persist();
   renderSync(); renderSyncBanner();
@@ -2218,6 +2242,7 @@ function openSheet() {
 // INIT
 // ═══════════════════════════════════════════
 hydrate();
+loadCachedToken();        // reuse a still-valid OAuth token so quick reopens skip the sign-in
 ensureInvestAccounts();   // create investment accounts for any savings categories in use
 document.querySelectorAll(".tab-panel").forEach(p=>{ p.style.display="none"; });
 document.getElementById("tab-track").style.display="flex";
