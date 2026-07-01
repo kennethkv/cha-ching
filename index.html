@@ -207,6 +207,8 @@
     .sync-connect-btn:active { opacity: 0.8; }
     .sync-check { width: 32px; height: 32px; border-radius: 50%; background: #e7f9ee; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .sync-status { font-size: 12px; display: flex; align-items: center; gap: 4px; flex-shrink: 0; color: #34c759; }
+    .sync-reconnect { background: #fff4e0; color: #a8660a; border: none; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; flex-shrink: 0; }
+    .sync-reconnect:active { opacity: 0.85; }
     .sync-banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff8e6; border-bottom: 1px solid #ffe8b3; font-size: 13px; color: #7a5a00; flex-shrink: 0; }
     .sync-banner-text { flex: 1; line-height: 1.35; }
     .sync-banner-btn { background: #007aff; color: #fff; border: none; padding: 6px 12px; border-radius: 7px; font-size: 13px; font-family: inherit; cursor: pointer; flex-shrink: 0; }
@@ -617,6 +619,7 @@ const LANG = {
       group: "Backup & Sync",
       connectTitle: "Connect Google Sheets", connectSub: "Back up to your own Google account", connect: "Connect",
       connected: "Connected", synced: "Synced just now", viewSheet: "View sheet", disconnect: "Disconnect",
+      reconnect: "Sign-in expired — reconnect",
       explainerTitle: "Connect Google Sheets",
       explainerBody: "Your transactions are saved to a private spreadsheet in your own Google Drive. This app can only see the sheet it creates — nothing else in your Drive. You can open it anytime.",
       continue: "Continue", notNow: "Not now",
@@ -684,6 +687,7 @@ const LANG = {
       group: "Sandaran & Penyegerakan",
       connectTitle: "Sambung Google Sheets", connectSub: "Sandar ke akaun Google anda sendiri", connect: "Sambung",
       connected: "Tersambung", synced: "Disegerak sebentar tadi", viewSheet: "Lihat helaian", disconnect: "Putus sambungan",
+      reconnect: "Log masuk tamat — sambung semula",
       explainerTitle: "Sambung Google Sheets",
       explainerBody: "Transaksi anda disimpan dalam helaian peribadi di Google Drive anda sendiri. Apl ini hanya nampak helaian yang diciptanya — tiada apa lagi dalam Drive anda. Anda boleh membukanya bila-bila masa.",
       continue: "Teruskan", notNow: "Bukan sekarang",
@@ -751,6 +755,7 @@ const LANG = {
       group: "备份与同步",
       connectTitle: "连接 Google 表格", connectSub: "备份到你自己的 Google 账户", connect: "连接",
       connected: "已连接", synced: "刚刚已同步", viewSheet: "查看表格", disconnect: "断开连接",
+      reconnect: "登录已过期 — 重新连接",
       explainerTitle: "连接 Google 表格",
       explainerBody: "你的交易会保存到你自己 Google Drive 中的私人表格。此应用只能访问它自己创建的表格 — 无法访问 Drive 中的其他内容。你可以随时打开它。",
       continue: "继续", notNow: "暂不",
@@ -1821,6 +1826,14 @@ function doImport(mode) {
 // once the app is hosted and you have an OAuth Client ID.
 // ═══════════════════════════════════════════
 const SYNC_BANNER_AFTER = 10; // entries before the discovery nudge appears
+let syncNeedsReconnect = false; // token lost/expired — surfaced honestly in the UI
+
+function syncStatusHtml() {
+  if (syncNeedsReconnect) {
+    return `<button class="sync-reconnect" onclick="reconnectSync()">${t("sync.reconnect")}</button>`;
+  }
+  return `<div class="sync-status"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>${t("sync.synced")}</div>`;
+}
 
 function renderSync() {
   const el = document.getElementById("sync-group");
@@ -1834,7 +1847,7 @@ function renderSync() {
           <div class="sync-title">${t("sync.connected")}</div>
           <div class="sync-sub">${esc(S.sync.email || "")}</div>
         </div>
-        <div class="sync-status"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>${t("sync.synced")}</div>
+        ${syncStatusHtml()}
       </div>
       <div class="data-btn" onclick="openSheet()">
         <span class="data-btn-label">${t("sync.viewSheet")}</span>
@@ -1955,18 +1968,48 @@ async function syncUp() {
   if (!S.sync.connected || _syncing) return;
   _syncing = true;
   try {
+    await ensureToken(); // fail fast on auth so we never half-clear the sheet
     const id = await ensureSpreadsheet();
     await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A:F:clear`, { method: "POST", body: "{}" });
     await gapi(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A1?valueInputOption=RAW`, {
       method: "PUT", body: JSON.stringify({ values: txnsToRows() })
     });
     S.sync.lastSync = Date.now();
+    syncNeedsReconnect = false;
     persist();
     renderSync();
   } catch (e) {
     console.warn("[sync] syncUp failed:", e.message);
+    syncNeedsReconnect = true; // surface it instead of failing silently
+    renderSync();
   } finally {
     _syncing = false;
+  }
+}
+
+// Called on app load when already "connected": try to silently restore the token
+// (works when the Google session is still valid) and flush; otherwise show Reconnect.
+async function resumeSync() {
+  if (!S.sync.connected) return;
+  try {
+    await getToken(false); // best-effort silent — no popup
+    await syncUp();
+  } catch (e) {
+    console.warn("[sync] resume needs reconnect:", e.message || e);
+    syncNeedsReconnect = true;
+    renderSync();
+  }
+}
+
+// User-tapped reconnect: interactive re-auth (this IS a user gesture) then flush.
+async function reconnectSync() {
+  try {
+    await getToken(true);
+    syncNeedsReconnect = false;
+    renderSync();
+    await syncUp();
+  } catch (e) {
+    console.warn("[sync] reconnect failed:", e.message || e);
   }
 }
 
@@ -2046,6 +2089,7 @@ document.getElementById("tab-track").style.display="flex";
 applyLang();
 renderMessages();
 updateHeader();
+resumeSync();            // restore the Google token (if session still valid) and flush pending changes
 maybePromptDueFixed();   // offer to record any recurring items due since last open
 
 // Re-check recurring items when the app returns to the foreground (e.g. across a day/month boundary)
