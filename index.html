@@ -209,6 +209,15 @@
     .sync-banner-btn { background: #007aff; color: #fff; border: none; padding: 6px 12px; border-radius: 7px; font-size: 13px; font-family: inherit; cursor: pointer; flex-shrink: 0; }
     .sync-banner-close { background: none; border: none; color: #b38f3a; font-size: 18px; cursor: pointer; padding: 0 4px; flex-shrink: 0; line-height: 1; }
 
+    /* Install / Add-to-Home-Screen banner (top of app; only in-browser, hidden once installed) */
+    .install-banner { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: #eef4ff; border-bottom: 1px solid #d6e4ff; flex-shrink: 0; }
+    .install-icon { width: 34px; height: 34px; border-radius: 9px; background: #007aff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .install-text { flex: 1; min-width: 0; }
+    .install-title { font-size: 13px; font-weight: 700; color: #1a1a1a; line-height: 1.2; }
+    .install-sub { font-size: 12px; color: #5a6b8c; line-height: 1.3; margin-top: 1px; }
+    .install-btn { background: #007aff; color: #fff; border: none; padding: 7px 14px; border-radius: 16px; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; flex-shrink: 0; }
+    .install-close { background: none; border: none; color: #90a0bd; font-size: 16px; cursor: pointer; padding: 0 2px; flex-shrink: 0; line-height: 1; }
+
     /* Recurring "due" confirm sheet */
     .recur-row { display: flex; align-items: center; gap: 10px; padding: 11px 4px; border-bottom: 1px solid #f3f3f3; cursor: pointer; }
     .recur-row:last-child { border-bottom: none; }
@@ -245,6 +254,19 @@
 </head>
 <body>
 <div id="app">
+
+  <!-- Install / Add-to-Home-Screen banner (populated + toggled by initInstallBanner) -->
+  <div id="install-banner" class="install-banner" style="display:none">
+    <div class="install-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M21 12h-6a2 2 0 0 0 0 4h6"/></svg>
+    </div>
+    <div class="install-text">
+      <div class="install-title" id="ib-title">Install Cha-Ching</div>
+      <div class="install-sub" id="ib-sub">Add it to your home screen for one-tap access.</div>
+    </div>
+    <button class="install-btn" id="ib-action" onclick="onInstallAction()">Install</button>
+    <button class="install-close" aria-label="Dismiss" onclick="dismissInstallBanner()">✕</button>
+  </div>
 
   <!-- Header -->
   <div class="header">
@@ -581,6 +603,13 @@ const LANG = {
       unclear: "Hmm, I didn't catch that. Try: <b>Lunch 5</b> · <b>Salary 1200</b> · <b>Save bibd 500</b>",
       whichCat: "Which category?",
     },
+    install: {
+      title: "Install Cha-Ching",
+      sub: "Add it to your home screen for one-tap access.",
+      action: "Install",
+      ios: "Tap Share, then \"Add to Home Screen\".",
+      inapp: "Open in Safari or Chrome, then add to your home screen.",
+    },
     fixed: {
       income: "Recurring Income", expense: "Recurring Expenses", savings: "Recurring Savings",
       addIncome: "＋ Add Income", addExpense: "＋ Add Expense", addSavings: "＋ Add Savings",
@@ -650,6 +679,13 @@ const LANG = {
       unclear: "Hmm, saya tak faham. Cuba: <b>Makan 5</b> · <b>Gaji 1200</b> · <b>Simpan bibd 500</b>",
       whichCat: "Kategori mana?",
     },
+    install: {
+      title: "Pasang Cha-Ching",
+      sub: "Tambah ke skrin utama untuk akses satu ketik.",
+      action: "Pasang",
+      ios: "Tekan Kongsi, kemudian \"Add to Home Screen\".",
+      inapp: "Buka dalam Safari atau Chrome, kemudian tambah ke skrin utama.",
+    },
     fixed: {
       income: "Pendapatan Tetap", expense: "Perbelanjaan Tetap", savings: "Simpanan Tetap",
       addIncome: "＋ Tambah Pendapatan", addExpense: "＋ Tambah Perbelanjaan", addSavings: "＋ Tambah Simpanan",
@@ -718,6 +754,13 @@ const LANG = {
       editInfo: "如需修改，请到<b>记录</b>页面点击任一记录上的铅笔图标。",
       unclear: "嗯，我没看懂。试试：<b>午餐 5</b> · <b>薪水 1200</b> · <b>储蓄 bibd 500</b>",
       whichCat: "归到哪个分类？",
+    },
+    install: {
+      title: "安装 Cha-Ching",
+      sub: "添加到主屏幕，一键打开。",
+      action: "安装",
+      ios: "点按分享，然后选择「加入主画面」。",
+      inapp: "请在 Safari 或 Chrome 中打开，再添加到主屏幕。",
     },
     fixed: {
       income: "固定收入", expense: "固定支出", savings: "固定储蓄",
@@ -2226,6 +2269,77 @@ function openSheet() {
 }
 
 // ═══════════════════════════════════════════
+// INSTALL / ADD-TO-HOME-SCREEN BANNER
+// Shown only in a browser tab; hidden once the app runs from the home screen.
+// Android/Chrome fires beforeinstallprompt → real one-tap install. iOS Safari has no
+// programmatic install, so we show the Share → Add to Home Screen instructions instead.
+// ═══════════════════════════════════════════
+let deferredInstallPrompt = null;
+const INSTALL_DISMISS_KEY = "cha-ching-install-dismissed";
+
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+}
+function isInAppBrowser() {
+  return /FBAN|FBAV|Instagram|Threads|Line\/|Twitter|WhatsApp/i.test(navigator.userAgent);
+}
+function installDismissed() {
+  try { return localStorage.getItem(INSTALL_DISMISS_KEY) === "1"; } catch (e) { return false; }
+}
+
+// Android/Chrome: capture the event so our own button can trigger the native install
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (!isStandalone() && !installDismissed()) showInstallBanner();
+});
+window.addEventListener("appinstalled", () => { deferredInstallPrompt = null; hideInstallBanner(); });
+
+function initInstallBanner() {
+  if (isStandalone() || installDismissed()) return;   // already installed or dismissed → never show
+  // Android fires beforeinstallprompt (handled above). iOS never does, so show its
+  // instructions directly. Other desktop browsers just wait for the event.
+  if (isIOS()) showInstallBanner();
+}
+
+function showInstallBanner() {
+  const el = document.getElementById("install-banner");
+  if (!el || isStandalone() || installDismissed()) return;
+  const sub = document.getElementById("ib-sub"), action = document.getElementById("ib-action");
+  document.getElementById("ib-title").textContent = t("install.title");
+  if (isInAppBrowser()) {              // Threads/IG/FB webviews can't add to home screen
+    sub.textContent = t("install.inapp");
+    action.style.display = "none";
+  } else if (deferredInstallPrompt) {  // Android one-tap install
+    sub.textContent = t("install.sub");
+    action.textContent = t("install.action");
+    action.style.display = "";
+  } else {                             // iOS instructions
+    sub.textContent = t("install.ios");
+    action.style.display = "none";
+  }
+  el.style.display = "flex";
+}
+function hideInstallBanner() {
+  const el = document.getElementById("install-banner");
+  if (el) el.style.display = "none";
+}
+async function onInstallAction() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  try { await deferredInstallPrompt.userChoice; } catch (e) {}
+  deferredInstallPrompt = null;
+  hideInstallBanner();
+}
+function dismissInstallBanner() {
+  try { localStorage.setItem(INSTALL_DISMISS_KEY, "1"); } catch (e) {}
+  hideInstallBanner();
+}
+
+// ═══════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════
 hydrate();
@@ -2234,6 +2348,7 @@ ensureInvestAccounts();   // create investment accounts for any savings categori
 document.querySelectorAll(".tab-panel").forEach(p=>{ p.style.display="none"; });
 document.getElementById("tab-track").style.display="flex";
 applyLang();
+initInstallBanner();     // offer "Add to Home Screen" when running in a browser tab
 renderMessages();
 updateHeader();
 resumeSync();            // restore the Google token (if session still valid) and flush pending changes
