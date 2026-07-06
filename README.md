@@ -25,7 +25,7 @@ Type an entry and hit send:
 | `Claims 155` | Income · Reimbursement |
 | `Dividend 40` | Investment gain (credits your investment account) |
 | `Yesterday coffee 3` | Expense dated to yesterday |
-| `6/15 petrol 40` | Expense dated 15 June |
+| `15/6 petrol 40` | Expense dated 15 June |
 | `Delete` | Removes your last entry |
 
 If the category isn't obvious, Cha-Ching asks you to pick one — and remembers nothing you didn't confirm.
