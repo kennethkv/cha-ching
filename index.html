@@ -80,11 +80,6 @@
     .input-area textarea:focus { border-color: #007aff; background: #fff; }
     .send-btn { width: 40px; height: 40px; border-radius: 50%; background: #007aff; border: none; cursor: pointer; color: #fff; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .send-btn:active { opacity: 0.8; }
-    /* Quick-add suggestion chips (persistent syntax hint) */
-    .quick-chips { display: flex; gap: 8px; padding: 6px 12px 4px; overflow-x: auto; flex-shrink: 0; }
-    .quick-chips::-webkit-scrollbar { display: none; }
-    .quick-chip { padding: 7px 14px; border-radius: 16px; border: 1px solid #e2e2e2; background: #f8f8f8; font-size: 13px; color: #444; white-space: nowrap; flex-shrink: 0; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-    .quick-chip:active { background: #eef4ff; border-color: #007aff; color: #007aff; }
     /* Category picker chips */
     .cat-pick-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .cat-pick-chip { padding: 8px 12px; border-radius: 18px; border: 1px solid #e2e2e2; background: #f8f8f8; font-size: 13px; color: #333; font-family: inherit; cursor: pointer; }
@@ -278,7 +273,6 @@
     <div id="tab-track" class="tab-panel">
       <div id="sync-banner" class="sync-banner" style="display:none"></div>
       <div class="messages" id="messages"></div>
-      <div class="quick-chips" id="quick-chips"></div>
       <div class="source-row">
         <span class="source-lbl" id="src-label">Paid from</span>
         <select class="source-sel" id="src-sel" onchange="onSourceChange(this.value)"></select>
@@ -580,7 +574,7 @@ const LANG = {
     tabs: { track:"Track", fixed:"Fixed", stats:"Stats", records:"Records", settings:"Settings" },
     track: {
       placeholder: "Lunch 5 / Salary 1200 / Save bibd 500",
-      welcome: "Hey! Track your money here 😊\n\n💸 <b>Lunch 5</b> → Expense\n💰 <b>Salary 1200</b> → Income\n🏦 <b>Save bibd 500</b> → Savings\n🗑️ <b>Delete</b> → Remove last entry\n\nDate prefix: <b>Yesterday coffee 3</b> or <b>6/15 petrol 40</b>",
+      welcome: "Hey! Track your money here 😊\n\n💸 <b>Lunch 5</b> → Expense\n💰 <b>Salary 1200</b> → Income\n🏦 <b>Save bibd 500</b> → Savings\n🗑️ <b>Delete</b> → Remove last entry\n\nDate prefix: <b>Yesterday coffee 3</b> or <b>15/6 petrol 40</b>",
       nothingDelete: "Nothing to delete.",
       deleted: "Deleted",
       editInfo: "To edit, open the <b>Records</b> tab and tap the pencil on any entry.",
@@ -649,7 +643,7 @@ const LANG = {
     tabs: { track:"Rekod", fixed:"Tetap", stats:"Statistik", records:"Sejarah", settings:"Tetapan" },
     track: {
       placeholder: "Makan 5 / Gaji 1200 / Simpan bibd 500",
-      welcome: "Hai! Rekod wang awak di sini 😊\n\n💸 <b>Makan 5</b> → Perbelanjaan\n💰 <b>Gaji 1200</b> → Pendapatan\n🏦 <b>Simpan bibd 500</b> → Simpanan\n🗑️ <b>Padam</b> → Buang rekod terkini\n\nAwalan tarikh: <b>Semalam kopi 3</b> atau <b>6/15 minyak 40</b>",
+      welcome: "Hai! Rekod wang awak di sini 😊\n\n💸 <b>Makan 5</b> → Perbelanjaan\n💰 <b>Gaji 1200</b> → Pendapatan\n🏦 <b>Simpan bibd 500</b> → Simpanan\n🗑️ <b>Padam</b> → Buang rekod terkini\n\nAwalan tarikh: <b>Semalam kopi 3</b> atau <b>15/6 minyak 40</b>",
       nothingDelete: "Tiada rekod untuk dipadam.",
       deleted: "Dipadam",
       editInfo: "Untuk edit, buka tab <b>Sejarah</b> dan tekan ikon pensel pada rekod.",
@@ -718,7 +712,7 @@ const LANG = {
     tabs: { track:"记账", fixed:"固定", stats:"统计", records:"记录", settings:"设置" },
     track: {
       placeholder: "午餐 5 / 薪水 1200 / 储蓄 bibd 500",
-      welcome: "嗨！在这里记录收支 😊\n\n💸 <b>午餐 5</b> → 支出\n💰 <b>薪水 1200</b> → 收入\n🏦 <b>储蓄 bibd 500</b> → 存款\n🗑️ <b>删除</b> → 删除最近记录\n\n日期前缀：<b>昨天 咖啡 3</b> 或 <b>6/15 汽油 40</b>",
+      welcome: "嗨！在这里记录收支 😊\n\n💸 <b>午餐 5</b> → 支出\n💰 <b>薪水 1200</b> → 收入\n🏦 <b>储蓄 bibd 500</b> → 存款\n🗑️ <b>删除</b> → 删除最近记录\n\n日期前缀：<b>昨天 咖啡 3</b> 或 <b>15/6 汽油 40</b>",
       nothingDelete: "没有可删除的记录。",
       deleted: "已删除",
       editInfo: "如需修改，请到<b>记录</b>页面点击任一记录上的铅笔图标。",
@@ -792,6 +786,7 @@ const CAT_I18N = {
   "Salary":        { ms:"Gaji",                zh:"薪水" },
   "Freelance":     { ms:"Kerja Sambilan",      zh:"副业" },
   "Investment":    { ms:"Pelaburan",           zh:"投资" },
+  "Reimbursement": { ms:"Tuntutan",             zh:"报销" },
   "BIBD":          { ms:"BIBD",               zh:"BIBD" },
   "Baiduri":       { ms:"Baiduri",            zh:"Baiduri" },
   "TAIB":          { ms:"TAIB",               zh:"TAIB" },
@@ -819,6 +814,7 @@ const DEF_INCOME = {
   "Salary":     { icon:"💰", kw:["salary","pay","gaji","wage","paycheck","allowance","basic pay","commission","increment","upah","elaun","薪水","工资","月薪","薪金","工钱"] },
   "Freelance":  { icon:"💼", kw:["freelance","side income","side job","client","consulting","project","contract","bonus","overtime","kerja sambilan","pelanggan","bonus","lebih masa","副业","外快","接单","奖金","加班费","项目"] },
   "Investment": { icon:"📈", kw:["dividend","investment","return","profit","interest","capital","rental income","passive","dividen","pelaburan","pulangan","keuntungan","faedah","股息","投资","利息","回报","利润","收益"] },
+  "Reimbursement": { icon:"🧾", kw:["claim","claims","reimburse","reimbursement","refund","rebate","cashback","cash back","expense claim","insurance claim","tuntutan","bayaran balik","报销","理赔","退款","返现","回扣"] },
 };
 
 const DEF_SAVINGS = {
@@ -958,7 +954,12 @@ function parse(raw) {
     const dRx = /^(\d{1,2})[\/\-](\d{1,2})\s+/;
     const dm  = rest.match(dRx);
     if (dm) {
-      date = new Date(new Date().getFullYear(), parseInt(dm[1])-1, parseInt(dm[2])).toISOString().split("T")[0];
+      // Day/month order (e.g. 15/6 = 15 June) — matches local convention.
+      // Build the string directly so a UTC conversion can't shift the day (esp. UTC+8).
+      const yr = new Date().getFullYear();
+      const da = String(parseInt(dm[1])).padStart(2, "0");
+      const mo = String(parseInt(dm[2])).padStart(2, "0");
+      date = `${yr}-${mo}-${da}`;
       rest = rest.slice(dm[0].length);
     }
   }
@@ -1071,21 +1072,6 @@ function pickCat(i) {
 function onKey(e) { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }
 function autoResize(el) { el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,96)+"px"; }
 
-// Persistent quick-add chips — keep the entry syntax visible after the welcome message scrolls away
-function renderTrackChips() {
-  const el = document.getElementById("quick-chips");
-  if (!el) return;
-  const examples = (t("track.placeholder") || "").split(" / ").map(s=>s.trim()).filter(Boolean);
-  el.innerHTML = examples.map(s=>`<button class="quick-chip" onclick="useChip(this)">${s}</button>`).join("");
-}
-function useChip(btn) {
-  const inp = document.getElementById("inp");
-  inp.value = btn.textContent;
-  autoResize(inp);
-  inp.focus();
-  inp.setSelectionRange(inp.value.length, inp.value.length);
-}
-
 // ═══════════════════════════════════════════
 // MESSAGES
 // ═══════════════════════════════════════════
@@ -1138,9 +1124,8 @@ function applyLang() {
   document.getElementById("tlb-settings").textContent = L.tabs.settings;
   // Header
   updateHeader();
-  // Input placeholder + persistent quick-add chips
+  // Input placeholder
   document.getElementById("inp").placeholder = L.track.placeholder;
-  renderTrackChips();
   renderSyncBanner();
   document.getElementById("src-label").textContent = L.bal.paidFrom;
   renderSourceSel();
