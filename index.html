@@ -914,8 +914,10 @@ function hydrate() {
 // UTILS
 // ═══════════════════════════════════════════
 function fmt(amount) { return `${S.currency} ${Math.abs(amount).toFixed(2)}`; }
-function todayStr()  { return new Date().toISOString().split("T")[0]; }
-function dateOffset(n) { const d = new Date(); d.setDate(d.getDate()+n); return d.toISOString().split("T")[0]; }
+// Format a Date as YYYY-MM-DD in LOCAL time — never via UTC, or the day shifts at UTC+8
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function todayStr()  { return ymd(new Date()); }
+function dateOffset(n) { const d = new Date(); d.setDate(d.getDate()+n); return ymd(d); }
 function fmtDateShort(ds) { return new Date(ds+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}); }
 function nowTime() { return new Date().toTimeString().slice(0,5); }
 function catObj(type, name) { return S.cats[type]?.[name] || { icon:"📦" }; }
