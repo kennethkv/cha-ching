@@ -13,6 +13,10 @@
   <meta name="apple-mobile-web-app-title" content="Cha-Ching">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" href="icon-192.png">
+  <!-- Rounded display font for the wordmark (matches the logo); falls back to the system rounded face offline -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@700;800&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -48,10 +52,11 @@
     /* Header */
     .header { padding: calc(14px + env(safe-area-inset-top)) 18px 10px; background: #fff; border-bottom: 1px solid #f0f0f0; flex-shrink: 0; }
     .header-inner { display: flex; align-items: center; justify-content: space-between; }
-    .header-title { font-size: 19px; font-weight: 800; display: flex; align-items: center; gap: 7px; }
-    .brand-mark { width: 30px; height: 30px; flex-shrink: 0; object-fit: contain; }
-    .brand-word .bw1 { color: #16324f; }
-    .brand-word .bw2 { color: #16a34a; }
+    .header-title { font-size: 23px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+    .brand-mark { width: 42px; height: 42px; flex-shrink: 0; object-fit: contain; }
+    .brand-word { font-family: 'Baloo 2', ui-rounded, 'SF Pro Rounded', 'Segoe UI', system-ui, sans-serif; letter-spacing: -0.01em; }
+    .brand-word .bw1 { color: #15415a; }
+    .brand-word .bw2 { color: #32b16a; }
     .header-right { text-align: right; }
     .header-label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
     .header-amount { font-size: 24px; font-weight: 700; color: #ff3b30; }
