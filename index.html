@@ -199,6 +199,10 @@
     .cat-info { flex: 1; }
     .cat-name { font-size: 14px; color: #333; font-weight: 500; }
     .cat-kw   { font-size: 11px; color: #bbb; margin-top: 1px; }
+    .cat-act  { background: none; border: none; font-size: 15px; cursor: pointer; line-height: 1; opacity: 0.5; min-width: 36px; min-height: 36px; border-radius: 8px; }
+    .cat-act:hover { opacity: 1; background: #f4f4f4; }
+    .cat-add  { padding: 11px 16px; font-size: 14px; font-weight: 500; color: #16a34a; cursor: pointer; }
+    .cat-add:hover { background: #f9fdfa; }
 
     /* Backup & Sync */
     .sync-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
@@ -583,6 +587,45 @@
   </div>
 </div>
 
+<!-- Add / edit a category -->
+<div class="overlay hidden" id="cat-edit-overlay" onclick="overlayClose(event,'cat-edit-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="ce-title">Edit Category</div>
+    <div class="form-row">
+      <label class="form-lbl" id="ce-lbl-icon">Icon (emoji)</label>
+      <input class="form-input" id="ce-icon" maxlength="4">
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="ce-lbl-name">Name</label>
+      <input class="form-input" id="ce-name">
+    </div>
+    <div class="form-row">
+      <label class="form-lbl" id="ce-lbl-kw">Keywords</label>
+      <input class="form-input" id="ce-kw">
+      <div class="cat-kw" id="ce-kw-hint" style="margin-top:5px"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="ce-cancel" onclick="closeOverlay('cat-edit-overlay')">Cancel</button>
+      <button class="btn btn-primary"   id="ce-save"   onclick="saveCat()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reassign records before deleting a category that's still in use -->
+<div class="overlay hidden" id="cat-del-overlay" onclick="overlayClose(event,'cat-del-overlay')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="cd-title">Move records first</div>
+    <div class="form-row">
+      <label class="form-lbl" id="cd-body"></label>
+      <select class="form-select" id="cd-target"></select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="cd-cancel"  onclick="closeOverlay('cat-del-overlay')">Cancel</button>
+      <button class="btn btn-danger"    id="cd-confirm" onclick="confirmDeleteCat()">Move &amp; Delete</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════
 // TRANSLATIONS
@@ -638,6 +681,20 @@ const LANG = {
       expenseCats: "Expense Categories", incomeCats: "Income Categories", savingsCats: "Savings Categories",
       data: "Data",
       export: "Export to Excel", import: "Import from Excel", clear: "Clear All Data",
+    },
+    cats: {
+      add: "＋ Add category",
+      editTitle: "Edit Category", newTitle: "New Category",
+      name: "Name", icon: "Icon (emoji)", kw: "Keywords",
+      kwHint: "Comma-separated words that auto-detect this category",
+      nameRequired: "Enter a name.",
+      duplicate: "A category with that name already exists.",
+      cantDeleteLast: "You need at least one category here.",
+      cantDeleteOthers: "\"Others\" is the fallback category and can't be deleted.",
+      deleteConfirm: "Delete this category?",
+      inUseTitle: "Move records first",
+      inUseBody: "{name} is used by {n} record(s). Move them to:",
+      moveDelete: "Move & Delete",
     },
     modal: {
       addFixed: "Add Fixed Item", desc: "Description", amt: "Amount", cat: "Category", day: "Day of month",
@@ -715,6 +772,20 @@ const LANG = {
       data: "Data",
       export: "Eksport ke Excel", import: "Import dari Excel", clear: "Padam Semua Data",
     },
+    cats: {
+      add: "＋ Tambah kategori",
+      editTitle: "Edit Kategori", newTitle: "Kategori Baharu",
+      name: "Nama", icon: "Ikon (emoji)", kw: "Kata kunci",
+      kwHint: "Perkataan dipisahkan koma untuk pengesanan automatik",
+      nameRequired: "Masukkan nama.",
+      duplicate: "Kategori dengan nama itu sudah wujud.",
+      cantDeleteLast: "Anda perlukan sekurang-kurangnya satu kategori di sini.",
+      cantDeleteOthers: "\"Lain-lain\" ialah kategori lalai dan tidak boleh dipadam.",
+      deleteConfirm: "Padam kategori ini?",
+      inUseTitle: "Pindahkan rekod dahulu",
+      inUseBody: "{name} digunakan oleh {n} rekod. Pindahkan ke:",
+      moveDelete: "Pindah & Padam",
+    },
     modal: {
       addFixed: "Tambah Item Tetap", desc: "Penerangan", amt: "Jumlah", cat: "Kategori", day: "Hari dalam bulan",
       editTitle: "Edit Rekod", date: "Tarikh",
@@ -790,6 +861,20 @@ const LANG = {
       expenseCats: "支出类别", incomeCats: "收入类别", savingsCats: "储蓄类别",
       data: "数据",
       export: "导出至 Excel", import: "从 Excel 导入", clear: "清除所有数据",
+    },
+    cats: {
+      add: "＋ 添加分类",
+      editTitle: "编辑分类", newTitle: "新增分类",
+      name: "名称", icon: "图标（表情）", kw: "关键词",
+      kwHint: "以逗号分隔，用于自动识别此分类",
+      nameRequired: "请输入名称。",
+      duplicate: "该名称的分类已存在。",
+      cantDeleteLast: "此处至少需要保留一个分类。",
+      cantDeleteOthers: "「其他」是默认分类，无法删除。",
+      deleteConfirm: "删除此分类？",
+      inUseTitle: "请先转移记录",
+      inUseBody: "{name} 有 {n} 条记录。转移到：",
+      moveDelete: "转移并删除",
     },
     modal: {
       addFixed: "添加固定项目", desc: "描述", amt: "金额", cat: "类别", day: "每月日期",
@@ -908,6 +993,8 @@ let S = {
     income:  deepClone(DEF_INCOME),
     savings: deepClone(DEF_SAVINGS),
   },
+  // Defaults are re-merged on every load, so a deleted default has to be remembered explicitly
+  removedCats: { expense: [], income: [], savings: [] },
   sync: { connected:false, email:null, spreadsheetId:null, lastSync:null, bannerDismissed:false },
   accounts: [
     { id:"acc_bank", name:"Bank", icon:"🏦", baseline:0, kind:"asset" },
@@ -933,6 +1020,7 @@ function persist() {
     currency:     S.currency,
     lang:         S.lang,
     cats:         S.cats,
+    removedCats:  S.removedCats,
     sync:         S.sync,
     accounts:      S.accounts,
     currentSource: S.currentSource,
@@ -949,11 +1037,15 @@ function hydrate() {
     if (d.fixedItems)   S.fixedItems   = d.fixedItems;
     if (d.currency)     S.currency     = d.currency;
     if (d.lang)         S.lang         = d.lang;
+    if (d.removedCats) S.removedCats = { expense: [], income: [], savings: [], ...d.removedCats };
     if (d.cats) {
       S.cats.expense = { ...deepClone(DEF_EXPENSE), ...d.cats.expense };
       S.cats.income  = { ...deepClone(DEF_INCOME),  ...d.cats.income  };
       S.cats.savings = { ...deepClone(DEF_SAVINGS), ...d.cats.savings };
     }
+    // Re-apply deletions, since the spread above resurrects every default category
+    ["expense","income","savings"].forEach(tp =>
+      (S.removedCats[tp] || []).forEach(n => { delete S.cats[tp][n]; }));
     if (d.sync) S.sync = { ...S.sync, ...d.sync };
     if (Array.isArray(d.accounts) && d.accounts.length) S.accounts = d.accounts;
     if (d.currentSource) S.currentSource = d.currentSource;
@@ -1035,7 +1127,7 @@ function parse(raw) {
   // Savings trigger keywords (all languages)
   if (/\b(save|saving|deposit|tabung|simpan|储蓄|存钱|存款|积蓄)\b/.test(loRest)) {
     const sav = detectCat(loRest, S.cats.savings);
-    return { type:"savings", amount, date, note, category: sav || "BIBD", needCat: !sav };
+    return { type:"savings", amount, date, note, category: sav || firstCat("savings"), needCat: !sav };
   }
 
   // Income
@@ -1209,6 +1301,15 @@ function applyLang() {
   document.getElementById("sg-expense-cats").textContent = L.settings.expenseCats;
   document.getElementById("sg-income-cats").textContent  = L.settings.incomeCats;
   document.getElementById("sg-savings-cats").textContent = L.settings.savingsCats;
+  // Category add/edit + reassign-on-delete modals
+  document.getElementById("ce-lbl-icon").textContent = L.cats.icon;
+  document.getElementById("ce-lbl-name").textContent = L.cats.name;
+  document.getElementById("ce-lbl-kw").textContent   = L.cats.kw;
+  document.getElementById("ce-kw-hint").textContent  = L.cats.kwHint;
+  document.getElementById("ce-cancel").textContent   = L.modal.cancel;
+  document.getElementById("ce-save").textContent     = L.modal.save;
+  document.getElementById("cd-cancel").textContent   = L.modal.cancel;
+  document.getElementById("cd-confirm").textContent  = L.cats.moveDelete;
   document.getElementById("sg-data").textContent         = L.settings.data;
   document.getElementById("sl-currency").textContent     = L.settings.currency;
   document.getElementById("sl-language").textContent     = L.settings.language;
@@ -1808,21 +1909,151 @@ function saveEdit() {
 // ═══════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+// CATEGORY MANAGEMENT (add / edit / delete)
+// The category NAME is the key stored on transactions, fixed items and the
+// auto-created investment accounts, so a rename must migrate all three together.
+// ═══════════════════════════════════════════
+function firstCat(type) { return Object.keys(S.cats[type] || {})[0] || "Others"; }
+
+function catUsage(type, name) {
+  return S.transactions.filter(t => t.type === type && t.category === name).length
+       + S.fixedItems.filter(f => f.type === type && f.category === name).length;
+}
+
+function migrateCatRecords(type, oldName, newName) {
+  S.transactions.forEach(t => { if (t.type === type && t.category === oldName) t.category = newName; });
+  S.fixedItems.forEach(f => { if (f.type === type && f.category === oldName) f.category = newName; });
+}
+
+// Rename only: carry the linked investment account across. Skipped when a matcher for
+// newName already exists, or two accounts would sum the same savings rows twice.
+function renameInvestAccount(oldName, newName) {
+  if (S.accounts.some(a => a.kind === "investment" && a.matchCat === newName)) return;
+  S.accounts.forEach(a => {
+    if (a.kind === "investment" && a.matchCat === oldName) {
+      a.matchCat = newName;
+      if (a.name === oldName) a.name = newName;
+    }
+  });
+}
+
+// Drop a savings category's investment account only when it holds nothing at all
+function pruneInvestAccount(catName) {
+  const acc = S.accounts.find(a => a.kind === "investment" && a.matchCat === catName);
+  if (!acc || acc.baseline) return;
+  const referenced = S.transactions.some(t =>
+    (t.type === "savings"  && t.category === catName) ||
+    (t.type === "gain"     && t.account  === acc.id)  ||
+    (t.type === "transfer" && (t.from === acc.id || t.to === acc.id)));
+  if (!referenced) S.accounts = S.accounts.filter(a => a.id !== acc.id);
+}
+
+// A removed default would be re-merged by hydrate(), so remember it
+function markRemoved(type, name) {
+  const defs = { expense: DEF_EXPENSE, income: DEF_INCOME, savings: DEF_SAVINGS }[type];
+  if (defs && defs[name] && !S.removedCats[type].includes(name)) S.removedCats[type].push(name);
+}
+function unmarkRemoved(type, name) {
+  S.removedCats[type] = (S.removedCats[type] || []).filter(n => n !== name);
+}
+
+function refreshAfterCatChange() {
+  ensureInvestAccounts();
+  persist();
+  renderSettings(); renderRecords(); renderBalances(); renderFixed(); renderSourceSel(); updateHeader();
+}
+
+let catEdit = null; // { type, name } — name is null when adding
+function openCatModal(type, name) {
+  catEdit = { type, name: name || null };
+  const c = name ? S.cats[type][name] : null;
+  document.getElementById("ce-title").textContent = t(name ? "cats.editTitle" : "cats.newTitle");
+  document.getElementById("ce-icon").value = c ? c.icon : "";
+  document.getElementById("ce-name").value = name || "";
+  document.getElementById("ce-kw").value   = c ? c.kw.join(", ") : "";
+  document.getElementById("cat-edit-overlay").classList.remove("hidden");
+}
+
+function saveCat() {
+  const type = catEdit.type, oldName = catEdit.name;
+  const newName = document.getElementById("ce-name").value.trim();
+  const icon    = document.getElementById("ce-icon").value.trim() || "📦";
+  let kw = document.getElementById("ce-kw").value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (!newName) { alert(t("cats.nameRequired")); return; }
+  if (newName !== oldName && S.cats[type][newName]) { alert(t("cats.duplicate")); return; }
+  if (!kw.length) kw = [newName.toLowerCase()]; // so a new category is still auto-detectable
+
+  if (oldName && oldName !== newName) {
+    // Rebuild the map to keep the original ordering while swapping the key
+    const rebuilt = {};
+    Object.keys(S.cats[type]).forEach(k => {
+      rebuilt[k === oldName ? newName : k] = (k === oldName) ? { icon, kw } : S.cats[type][k];
+    });
+    S.cats[type] = rebuilt;
+    migrateCatRecords(type, oldName, newName);
+    if (type === "savings") renameInvestAccount(oldName, newName);
+    markRemoved(type, oldName);
+  } else {
+    S.cats[type][newName] = { icon, kw };
+  }
+  unmarkRemoved(type, newName);
+  closeOverlay("cat-edit-overlay");
+  refreshAfterCatChange();
+}
+
+let catDel = null;
+function askDeleteCat(type, name) {
+  if (Object.keys(S.cats[type]).length <= 1) { alert(t("cats.cantDeleteLast")); return; }
+  if (type === "expense" && name === "Others") { alert(t("cats.cantDeleteOthers")); return; }
+
+  const n = catUsage(type, name);
+  if (!n) { if (confirm(t("cats.deleteConfirm"))) doDeleteCat(type, name, null); return; }
+
+  catDel = { type, name };
+  document.getElementById("cd-title").textContent = t("cats.inUseTitle");
+  document.getElementById("cd-body").textContent  =
+    t("cats.inUseBody").replace("{name}", catName(name)).replace("{n}", n);
+  document.getElementById("cd-target").innerHTML = Object.keys(S.cats[type])
+    .filter(k => k !== name)
+    .map(k => `<option value="${esc(k)}">${esc(catObj(type, k).icon)} ${esc(catName(k))}</option>`).join("");
+  document.getElementById("cat-del-overlay").classList.remove("hidden");
+}
+
+function confirmDeleteCat() {
+  doDeleteCat(catDel.type, catDel.name, document.getElementById("cd-target").value);
+  closeOverlay("cat-del-overlay");
+}
+
+function doDeleteCat(type, name, moveTo) {
+  if (moveTo) migrateCatRecords(type, name, moveTo);
+  delete S.cats[type][name];
+  markRemoved(type, name);
+  if (type === "savings") pruneInvestAccount(name);
+  refreshAfterCatChange();
+}
+
 function renderSettings() {
   document.getElementById("cur-sel").value = S.currency;
   applyLang();
   renderSync();
   ["expense","income","savings"].forEach(type=>{
-    document.getElementById(`set-${type}-cats`).innerHTML=
-      Object.entries(S.cats[type]).map(([name,{icon,kw}])=>
-        `<div class="cat-row">
-          <div class="cat-icon">${icon}</div>
+    const rows = Object.entries(S.cats[type]).map(([name,{icon,kw}])=>{
+      const preview = kw.filter(k=>k.match(/[a-zA-Z]/)).slice(0,4).join(", ");
+      return `<div class="cat-row">
+          <div class="cat-icon">${esc(icon)}</div>
           <div class="cat-info">
-            <div class="cat-name">${catName(name)}</div>
-            <div class="cat-kw">${kw.filter(k=>k.match(/[a-zA-Z]/)).slice(0,4).join(", ")}${kw.length>4?"…":""}</div>
+            <div class="cat-name">${esc(catName(name))}</div>
+            <div class="cat-kw">${esc(preview)}${kw.length>4?"…":""}</div>
           </div>
-        </div>`
-      ).join("");
+          <button class="cat-act" data-t="${type}" data-n="${esc(name)}" aria-label="Edit"
+                  onclick="openCatModal(this.dataset.t, this.dataset.n)">✏️</button>
+          <button class="cat-act" data-t="${type}" data-n="${esc(name)}" aria-label="Delete"
+                  onclick="askDeleteCat(this.dataset.t, this.dataset.n)">🗑️</button>
+        </div>`;
+    }).join("");
+    document.getElementById(`set-${type}-cats`).innerHTML =
+      rows + `<div class="cat-add" onclick="openCatModal('${type}')">${esc(t("cats.add"))}</div>`;
   });
 }
 
